@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://street-face-shop.local/schemas/design.schema.json",
+  "title": "Street Face Design Catalogue",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "streetName",
+      "postcode",
+      "locality",
+      "slug",
+      "frontPreview",
+      "rearPreview",
+      "frontPrintAsset",
+      "rearPrintAsset",
+      "status"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^HB-[0-9]{4}$"
+      },
+      "streetName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "postcode": {
+        "type": "string",
+        "minLength": 2
+      },
+      "locality": {
+        "type": "string",
+        "minLength": 1
+      },
+      "slug": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "frontPreview": {
+        "type": "string",
+        "minLength": 1
+      },
+      "rearPreview": {
+        "type": "string",
+        "minLength": 1
+      },
+      "frontPrintAsset": {
+        "type": "string",
+        "minLength": 1
+      },
+      "rearPrintAsset": {
+        "type": "string",
+        "minLength": 1
+      },
+      "status": {
+        "type": "string",
+        "enum": ["active", "inactive", "review"]
+      }
+    }
+  }
+}
