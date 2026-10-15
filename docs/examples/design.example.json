@@ -1,0 +1,12 @@
+{
+  "id": "HB-0001",
+  "streetName": "Market Street",
+  "postcode": "HX7",
+  "locality": "Hebden Bridge",
+  "slug": "market-street",
+  "frontPreview": "previews/HB-0001/front.webp",
+  "rearPreview": "previews/HB-0001/rear.webp",
+  "frontPrintAsset": "print/HB-0001/front.png",
+  "rearPrintAsset": "print/HB-0001/rear.png",
+  "status": "review"
+}
