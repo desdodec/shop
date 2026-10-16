@@ -8,7 +8,6 @@ import os
 import re
 import urllib.error
 import urllib.request
-from collections import defaultdict
 
 from dotenv import load_dotenv
 from supabase import create_client
@@ -136,7 +135,8 @@ def main() -> int:
     if exact_codes:
         print("\nExpected behaviour: full postcode has exact mappings, so public RPC should return only exact matches.")
     else:
-        print("\nExpected behaviour: no exact mapping exists, so sector fallback may return broader results.")
+        print("\nExpected behaviour: no exact mapping exists, so a full-postcode search should return no postcode-derived results.")
+        print(f"Try the shorter sector {sector_compact[:-1]} {sector_compact[-1]} for broader discovery.")
 
     print(f"Extras vs exact: {len(extras)}")
     for code in sorted(extras):
@@ -147,11 +147,11 @@ def main() -> int:
         row = by_code.get(code, {})
         print(f"  {code} — {row.get('street_name', '?')}")
 
-    if exact_codes and (extras or missing):
+    if extras or missing:
         print("\nFAIL: public results do not match exact canonical mappings")
         return 1
 
-    print("\nPASS: public behaviour is consistent with the canonical mappings")
+    print("\nPASS: public full-postcode behaviour matches exact canonical mappings")
     return 0
 
 
