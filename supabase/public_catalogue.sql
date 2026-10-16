@@ -5,20 +5,16 @@
 --   * browser clients never receive direct SELECT privileges on internal tables
 --   * production_key is never returned
 --   * only active designs with validated assets are returned
+--   * postcode mappings are searchable but never returned directly
 --   * the function is read-only and has a fixed search_path
---
--- The function is intentionally keyed by public design_code for customer UX.
--- Internal fulfilment continues to resolve that unique design_code to the
--- canonical design row, whose durable database identity is dataset_id + street_id.
 
 begin;
 
--- Ensure browser roles cannot query the internal tables directly.
 revoke all on table public.designs from anon, authenticated;
 revoke all on table public.design_assets from anon, authenticated;
+revoke all on table public.design_postcodes from anon, authenticated;
 revoke all on table public.orders from anon, authenticated;
 
--- Recreate cleanly so the declared return type cannot drift unnoticed.
 drop function if exists public.search_catalogue(text, integer, integer);
 
 create function public.search_catalogue(
@@ -38,6 +34,11 @@ stable
 security definer
 set search_path = public
 as $$
+    with query as (
+        select
+            btrim(coalesce(search_text, '')) as raw,
+            upper(regexp_replace(btrim(coalesce(search_text, '')), '\\s+', '', 'g')) as compact
+    )
     select
         d.design_code,
         d.street_name,
@@ -50,18 +51,37 @@ as $$
      and a.product_sku = 'GLOBAL-MUG-W'
      and a.version = 1
      and a.validation_status = 'valid'
+    cross join query q
     where d.status = 'active'
       and (
-        nullif(btrim(search_text), '') is null
-        or d.street_name ilike '%' || btrim(search_text) || '%'
-        or d.design_code ilike '%' || btrim(search_text) || '%'
+        q.raw = ''
+        or d.street_name ilike '%' || q.raw || '%'
+        or d.design_code ilike '%' || q.raw || '%'
+        or exists (
+            select 1
+            from public.design_postcodes p
+            where p.design_id = d.id
+              and p.postcode_normalized like '%' || q.compact || '%'
+        )
       )
     order by
       case
-        when upper(d.design_code) = upper(btrim(search_text)) then 0
-        when lower(d.street_name) = lower(btrim(search_text)) then 1
-        when lower(d.street_name) like lower(btrim(search_text)) || '%' then 2
-        else 3
+        when upper(d.design_code) = upper(q.raw) then 0
+        when exists (
+            select 1
+            from public.design_postcodes p
+            where p.design_id = d.id
+              and p.postcode_normalized = q.compact
+        ) then 1
+        when lower(d.street_name) = lower(q.raw) then 2
+        when lower(d.street_name) like lower(q.raw) || '%' then 3
+        when exists (
+            select 1
+            from public.design_postcodes p
+            where p.design_id = d.id
+              and p.postcode_normalized like q.compact || '%'
+        ) then 4
+        else 5
       end,
       lower(d.street_name),
       d.design_code
@@ -73,6 +93,6 @@ revoke all on function public.search_catalogue(text, integer, integer) from publ
 grant execute on function public.search_catalogue(text, integer, integer) to anon, authenticated;
 
 comment on function public.search_catalogue(text, integer, integer) is
-'Browser-safe catalogue search. Returns only public mockup metadata for active, validated GLOBAL-MUG-W designs.';
+'Browser-safe catalogue search by street name, Design ID, or postcode. Returns only public mockup metadata.';
 
 commit;
