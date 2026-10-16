@@ -38,7 +38,7 @@ as $$
     with normalized as (
         select
             btrim(coalesce(search_text, '')) as raw,
-            upper(regexp_replace(btrim(coalesce(search_text, '')), '\\s+', '', 'g')) as compact
+            upper(replace(btrim(coalesce(search_text, '')), ' ', '')) as compact
     ),
     query as (
         select
@@ -77,7 +77,7 @@ as $$
                 select 1
                 from public.design_postcodes p
                 where p.design_id = d.id
-                  and p.postcode_normalized like q.postcode_prefix || '%'
+                  and upper(replace(btrim(p.postcode), ' ', '')) like q.postcode_prefix || '%'
             )
         )
       )
@@ -88,7 +88,7 @@ as $$
             select 1
             from public.design_postcodes p
             where p.design_id = d.id
-              and p.postcode_normalized = q.compact
+              and upper(replace(btrim(p.postcode), ' ', '')) = q.compact
         ) then 1
         when lower(d.street_name) = lower(q.raw) then 2
         when lower(d.street_name) like lower(q.raw) || '%' then 3
@@ -96,7 +96,7 @@ as $$
             select 1
             from public.design_postcodes p
             where p.design_id = d.id
-              and p.postcode_normalized like q.postcode_prefix || '%'
+              and upper(replace(btrim(p.postcode), ' ', '')) like q.postcode_prefix || '%'
         ) then 4
         else 5
       end,
