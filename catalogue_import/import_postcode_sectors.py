@@ -8,6 +8,10 @@ canonical catalogue identity via the already-verified rule:
 
     GeoJSON feature index == street_id
 
+Exact postcode mappings remain conservative. Sector mappings are discovery-only:
+several different nearby full postcodes can collectively provide strong evidence
+for the same postcode sector even when no single full postcode is strong enough.
+
 No street-name matching is used for identity. By default this is a dry run; pass
 --apply to replace design_postcode_sectors rows for resolved designs.
 """
@@ -15,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 from collections import defaultdict
@@ -48,18 +53,17 @@ def sector_from_postcode(value: str) -> str:
     return f"{sector_compact[:-1]} {sector_compact[-1]}"
 
 
-def choose_sectors(street: dict) -> list[str]:
-    """Choose broad-but-defensible sectors from all postcode candidates.
-
-    A sector qualifies when at least one candidate in it:
-      * hit at least 2 sampled street points, and
-      * came within 100 m of a sampled point.
-
-    Multiple sectors are allowed because a long street can legitimately cross a
-    sector boundary. If more than three qualify, keep only sectors whose best hit
-    count is within one of the strongest sector, capped at three.
-    """
-    grouped: dict[str, dict[str, float]] = defaultdict(lambda: {"best_hits": 0, "min_distance": 10_000.0})
+def sector_stats(street: dict) -> dict[str, dict[str, float]]:
+    """Aggregate candidate evidence by postcode sector."""
+    grouped: dict[str, dict[str, float]] = defaultdict(
+        lambda: {
+            "total_hits": 0,
+            "best_hits": 0,
+            "candidate_count": 0,
+            "close_candidates": 0,
+            "min_distance": 10_000.0,
+        }
+    )
 
     for candidate in street.get("candidates") or []:
         postcode = candidate.get("postcode")
@@ -69,26 +73,77 @@ def choose_sectors(street: dict) -> list[str]:
             sector = sector_from_postcode(str(postcode))
         except ValueError:
             continue
+
         hits = int(candidate.get("hit_count") or 0)
         distance = candidate.get("min_distance_m")
         try:
             distance_f = float(distance) if distance is not None else 10_000.0
         except (TypeError, ValueError):
             distance_f = 10_000.0
-        grouped[sector]["best_hits"] = max(grouped[sector]["best_hits"], hits)
-        grouped[sector]["min_distance"] = min(grouped[sector]["min_distance"], distance_f)
+
+        stats = grouped[sector]
+        stats["total_hits"] += hits
+        stats["best_hits"] = max(stats["best_hits"], hits)
+        stats["candidate_count"] += 1
+        if distance_f <= 150:
+            stats["close_candidates"] += 1
+        stats["min_distance"] = min(stats["min_distance"], distance_f)
+
+    return grouped
+
+
+def choose_sectors(street: dict) -> list[str]:
+    """Choose discovery sectors from grouped nearby postcode evidence.
+
+    Sector-level evidence is intentionally broader than exact postcode evidence.
+    A sector qualifies when its candidates collectively show useful proximity:
+
+      * at least one candidate is within 150 m, and
+      * either total sample hits across the sector >= 2, or at least two
+        candidate postcodes from that sector are within 150 m.
+
+    Among qualifying sectors we keep those with substantial evidence relative to
+    the strongest sector, capped at three. If none qualifies, a conservative
+    fallback accepts the single closest sector only when it is within 200 m. This
+    is safe for discovery because the customer still chooses the actual street.
+    """
+    grouped = sector_stats(street)
+    if not grouped:
+        return []
 
     eligible = [
         (sector, stats)
         for sector, stats in grouped.items()
-        if stats["best_hits"] >= 2 and stats["min_distance"] <= 100
+        if stats["min_distance"] <= 150
+        and (stats["total_hits"] >= 2 or stats["close_candidates"] >= 2)
     ]
+
     if not eligible:
+        closest = sorted(
+            grouped.items(),
+            key=lambda item: (item[1]["min_distance"], -item[1]["total_hits"], item[0]),
+        )
+        if closest and closest[0][1]["min_distance"] <= 200:
+            return [closest[0][0]]
         return []
 
-    eligible.sort(key=lambda item: (-item[1]["best_hits"], item[1]["min_distance"], item[0]))
-    best_hits = eligible[0][1]["best_hits"]
-    chosen = [sector for sector, stats in eligible if stats["best_hits"] >= best_hits - 1]
+    eligible.sort(
+        key=lambda item: (
+            -item[1]["total_hits"],
+            -item[1]["best_hits"],
+            -item[1]["close_candidates"],
+            item[1]["min_distance"],
+            item[0],
+        )
+    )
+
+    best_total_hits = eligible[0][1]["total_hits"]
+    threshold = max(2, math.ceil(best_total_hits * 0.4))
+    chosen = [
+        sector
+        for sector, stats in eligible
+        if stats["total_hits"] >= threshold
+    ]
     return chosen[:3]
 
 
@@ -117,6 +172,7 @@ def main() -> int:
     skipped_no_design = 0
     skipped_no_sector = 0
     name_mismatches: list[str] = []
+    burnley_debug: dict[str, dict[str, float]] | None = None
 
     for index, (street, feature) in enumerate(zip(streets, features)):
         street_id = f"{index:04d}"
@@ -131,6 +187,9 @@ def main() -> int:
         if candidate_name != geo_name or design_name != geo_name:
             name_mismatches.append(f"{street_id}: candidate={candidate_name!r}, geo={geo_name!r}, design={design_name!r}")
             continue
+
+        if design_name.lower() == "burnley road":
+            burnley_debug = sector_stats(street)
 
         sectors = choose_sectors(street)
         if not sectors:
@@ -160,6 +219,20 @@ def main() -> int:
         print(f"Burnley Road sectors:    {', '.join(burnley[0][3])}")
     else:
         print("Burnley Road sectors:    NONE")
+
+    if burnley_debug:
+        print("Burnley Road evidence:")
+        for sector, stats in sorted(
+            burnley_debug.items(),
+            key=lambda item: (-item[1]["total_hits"], item[1]["min_distance"], item[0]),
+        ):
+            print(
+                f"  {sector}: total_hits={int(stats['total_hits'])}, "
+                f"best_hits={int(stats['best_hits'])}, "
+                f"candidates={int(stats['candidate_count'])}, "
+                f"close={int(stats['close_candidates'])}, "
+                f"min_distance={stats['min_distance']:.1f}m"
+            )
 
     if not args.apply:
         print("\nDRY RUN: no database changes made. Re-run with --apply to import.")
