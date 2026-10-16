@@ -70,7 +70,8 @@ figure figcaption,
 footer,
 .status,
 .checkout-note,
-.selected-code {
+.selected-code,
+.search-help {
   color: #66645e;
 }
 
@@ -131,6 +132,11 @@ h1 {
 .search input:focus {
   border-color: #191919;
   box-shadow: 0 0 0 3px rgba(25, 25, 25, 0.08);
+}
+
+.search-help {
+  margin: 9px 20px 0;
+  font-size: 0.85rem;
 }
 
 .search button,
@@ -226,14 +232,49 @@ h1 {
   gap: 18px;
 }
 
-.load-more-wrap {
-  display: flex;
-  justify-content: center;
-  padding-top: 24px;
+.results.finder-results {
+  display: block;
 }
 
-.load-more-wrap .secondary-button {
-  min-width: 220px;
+.street-finder-list {
+  overflow: hidden;
+  border: 1px solid #ddd7cc;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.street-finder-option {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border: 0;
+  border-bottom: 1px solid #eee9df;
+  background: #fff;
+  padding: 16px 18px;
+  color: #191919;
+  text-align: left;
+}
+
+.street-finder-option:last-child {
+  border-bottom: 0;
+}
+
+.street-finder-option:hover,
+.street-finder-option:focus-visible {
+  background: #f4f1ea;
+  outline: none;
+}
+
+.street-finder-option span {
+  font-size: 1.05rem;
+  font-weight: 750;
+}
+
+.street-finder-option small {
+  flex: none;
+  color: #77736d;
 }
 
 .design-card,
@@ -330,10 +371,6 @@ figure figcaption {
 .empty-state p {
   margin-bottom: 0;
   color: #66645e;
-}
-
-.empty-state .empty-action {
-  margin-top: 18px;
 }
 
 .selection-tray {
@@ -438,6 +475,12 @@ footer {
 
   .results {
     grid-template-columns: 1fr;
+  }
+
+  .street-finder-option {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .selection-heading {
