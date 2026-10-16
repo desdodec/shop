@@ -24,7 +24,6 @@ async function searchCatalogue(searchText = '') {
     method: 'POST',
     headers: {
       apikey: config.supabasePublishableKey,
-      Authorization: `Bearer ${config.supabasePublishableKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
