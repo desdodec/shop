@@ -1,3 +1,5 @@
+import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.14.0/dist/maplibre-gl.mjs';
+
 const config = window.STREET_FACE_CONFIG;
 
 if (!config?.supabaseUrl || !config?.supabasePublishableKey || !config?.mockupBaseUrl) {
@@ -30,7 +32,8 @@ let selectedDesigns = loadSelections();
 let debounceTimer = null;
 let requestVersion = 0;
 let streetMap = null;
-const mapLayersByDesignCode = new Map();
+let mapPopup = null;
+const mapItemsByDesignCode = new Map();
 
 function loadSelections() {
   try {
@@ -119,22 +122,29 @@ function updateFinderSelection(option, item) {
   );
 }
 
-function mapLineStyle(item) {
-  const selected = isSelected(item.design_code);
-  return {
-    color: selected ? '#8c3f22' : '#191919',
-    weight: selected ? 8 : 6,
-    opacity: selected ? 1 : 0.78,
-  };
+function mapSelectionExpression(selectedValue, defaultValue) {
+  const selectedCodes = selectedDesigns.map((item) => item.design_code);
+  if (!selectedCodes.length) return defaultValue;
+  return [
+    'case',
+    ['in', ['get', 'design_code'], ['literal', selectedCodes]],
+    selectedValue,
+    defaultValue,
+  ];
 }
 
 function refreshMapSelections() {
-  for (const [designCode, layers] of mapLayersByDesignCode.entries()) {
-    const item = { design_code: designCode };
-    for (const layer of layers) {
-      layer.setStyle(mapLineStyle(item));
-    }
-  }
+  if (!streetMap?.getLayer('available-streets')) return;
+  streetMap.setPaintProperty(
+    'available-streets',
+    'line-color',
+    mapSelectionExpression('#8c3f22', '#191919'),
+  );
+  streetMap.setPaintProperty(
+    'available-streets',
+    'line-width',
+    mapSelectionExpression(7, 4),
+  );
 }
 
 function renderSelectionTray() {
@@ -345,12 +355,21 @@ function designStreetId(item) {
   return match ? Number(match[1]) : null;
 }
 
-async function initialiseStreetMap() {
-  if (!mapElement || !mapStatus) return;
-  if (!window.L) {
-    mapStatus.textContent = 'The map could not be loaded. Use the street finder below.';
+function extendBoundsFromCoordinates(bounds, coordinates) {
+  if (!Array.isArray(coordinates)) return;
+  if (
+    coordinates.length >= 2
+    && typeof coordinates[0] === 'number'
+    && typeof coordinates[1] === 'number'
+  ) {
+    bounds.extend([coordinates[0], coordinates[1]]);
     return;
   }
+  for (const part of coordinates) extendBoundsFromCoordinates(bounds, part);
+}
+
+async function initialiseStreetMap() {
+  if (!mapElement || !mapStatus) return;
 
   try {
     const [geojsonResponse, catalogueItems] = await Promise.all([
@@ -364,10 +383,12 @@ async function initialiseStreetMap() {
 
     const geojson = await geojsonResponse.json();
     const catalogueByStreetId = new Map();
+    mapItemsByDesignCode.clear();
 
     for (const item of catalogueItems) {
       const streetId = designStreetId(item);
       if (streetId !== null) catalogueByStreetId.set(streetId, item);
+      mapItemsByDesignCode.set(item.design_code, item);
     }
 
     const availableFeatures = geojson.features
@@ -378,7 +399,8 @@ async function initialiseStreetMap() {
           ...feature,
           properties: {
             ...feature.properties,
-            catalogueItem: item,
+            design_code: item.design_code,
+            street_name: item.street_name,
           },
         };
       })
@@ -388,43 +410,89 @@ async function initialiseStreetMap() {
       throw new Error('No available street features were found.');
     }
 
-    streetMap = window.L.map(mapElement, {
-      scrollWheelZoom: false,
-      zoomControl: true,
-      attributionControl: false,
+    streetMap = new maplibregl.Map({
+      container: mapElement,
+      style: 'https://tiles.openfreemap.org/styles/positron',
+      center: [-2.0, 53.74],
+      zoom: 11,
+      attributionControl: true,
     });
 
-    const contextLayer = window.L.geoJSON(geojson, {
-      interactive: false,
-      style: {
-        color: '#c9c3b8',
-        weight: 2,
-        opacity: 0.7,
-      },
-    }).addTo(streetMap);
+    streetMap.scrollZoom.disable();
+    streetMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 
-    const geoLayer = window.L.geoJSON(
-      { type: 'FeatureCollection', features: availableFeatures },
-      {
-        style: (feature) => mapLineStyle(feature.properties.catalogueItem),
-        onEachFeature: (feature, layer) => {
-          const item = feature.properties.catalogueItem;
-          const existing = mapLayersByDesignCode.get(item.design_code) || [];
-          existing.push(layer);
-          mapLayersByDesignCode.set(item.design_code, existing);
+    streetMap.on('load', () => {
+      streetMap.addSource('available-streets-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: availableFeatures },
+      });
 
-          layer.bindTooltip(item.street_name, { sticky: true });
-          layer.on('mouseover', () => {
-            if (!isSelected(item.design_code)) layer.setStyle({ weight: 9, opacity: 1 });
-          });
-          layer.on('mouseout', () => layer.setStyle(mapLineStyle(item)));
-          layer.on('click', () => renderDesign(item, { scroll: true }));
+      streetMap.addLayer({
+        id: 'available-streets-hit-area',
+        type: 'line',
+        source: 'available-streets-source',
+        paint: {
+          'line-color': '#000000',
+          'line-opacity': 0,
+          'line-width': 16,
         },
-      },
-    ).addTo(streetMap);
+      });
 
-    streetMap.fitBounds(contextLayer.getBounds(), { padding: [18, 18] });
-    mapStatus.textContent = `${catalogueItems.length} street designs available`;
+      streetMap.addLayer({
+        id: 'available-streets',
+        type: 'line',
+        source: 'available-streets-source',
+        paint: {
+          'line-color': mapSelectionExpression('#8c3f22', '#191919'),
+          'line-width': mapSelectionExpression(7, 4),
+          'line-opacity': 0.9,
+        },
+      });
+
+      const bounds = new maplibregl.LngLatBounds();
+      for (const feature of geojson.features) {
+        extendBoundsFromCoordinates(bounds, feature.geometry?.coordinates);
+      }
+      if (!bounds.isEmpty()) {
+        streetMap.fitBounds(bounds, { padding: 34, maxZoom: 15, duration: 0 });
+      }
+
+      mapPopup = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        offset: 10,
+      });
+
+      streetMap.on('mouseenter', 'available-streets-hit-area', () => {
+        streetMap.getCanvas().style.cursor = 'pointer';
+      });
+
+      streetMap.on('mouseleave', 'available-streets-hit-area', () => {
+        streetMap.getCanvas().style.cursor = '';
+        mapPopup.remove();
+      });
+
+      streetMap.on('mousemove', 'available-streets-hit-area', (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        mapPopup
+          .setLngLat(event.lngLat)
+          .setText(feature.properties?.street_name || 'Available street')
+          .addTo(streetMap);
+      });
+
+      streetMap.on('click', 'available-streets-hit-area', (event) => {
+        const designCode = event.features?.[0]?.properties?.design_code;
+        const item = mapItemsByDesignCode.get(designCode);
+        if (item) renderDesign(item, { scroll: true });
+      });
+
+      mapStatus.textContent = `${catalogueItems.length} street designs available`;
+    });
+
+    streetMap.on('error', (event) => {
+      console.error('Map error', event.error || event);
+    });
   } catch (error) {
     console.error(error);
     mapStatus.textContent = 'The map could not be loaded. Use the street finder below.';
