@@ -391,11 +391,16 @@ async function initialiseStreetMap() {
     streetMap = window.L.map(mapElement, {
       scrollWheelZoom: false,
       zoomControl: true,
+      attributionControl: false,
     });
 
-    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors',
+    const contextLayer = window.L.geoJSON(geojson, {
+      interactive: false,
+      style: {
+        color: '#c9c3b8',
+        weight: 2,
+        opacity: 0.7,
+      },
     }).addTo(streetMap);
 
     const geoLayer = window.L.geoJSON(
@@ -418,7 +423,7 @@ async function initialiseStreetMap() {
       },
     ).addTo(streetMap);
 
-    streetMap.fitBounds(geoLayer.getBounds(), { padding: [18, 18] });
+    streetMap.fitBounds(contextLayer.getBounds(), { padding: [18, 18] });
     mapStatus.textContent = `${catalogueItems.length} street designs available`;
   } catch (error) {
     console.error(error);
