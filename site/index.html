@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Find your Hebden Bridge street and preview its Street Face mug design.">
+  <title>Find Your Street | Street Face</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Street Face home">Street Face</a>
+    <span class="pilot">Hebden Bridge collection</span>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <p class="eyebrow">A mug built around somewhere that matters</p>
+      <h1 id="hero-title">Find Your Street</h1>
+      <p class="hero-copy">Search the Hebden Bridge collection by street name or Design ID. Each street has its own map-derived face and matching reverse.</p>
+
+      <form id="search-form" class="search" role="search">
+        <label for="search-input">Street name or Design ID</label>
+        <div class="search-row">
+          <input
+            id="search-input"
+            name="q"
+            type="search"
+            inputmode="search"
+            autocomplete="street-address"
+            placeholder="e.g. Blenheim Street or HB-0024"
+            maxlength="100"
+          >
+          <button type="submit">Search</button>
+        </div>
+      </form>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="results-wrap" aria-labelledby="results-title">
+      <div class="results-heading">
+        <h2 id="results-title">Street designs</h2>
+        <span id="result-count" class="result-count"></span>
+      </div>
+      <div id="results" class="results"></div>
+    </section>
+  </main>
+
+  <template id="design-template">
+    <article class="design-card">
+      <div class="preview-grid">
+        <figure>
+          <img class="front-image" alt="" loading="lazy" decoding="async">
+          <figcaption>Front</figcaption>
+        </figure>
+        <figure>
+          <img class="rear-image" alt="" loading="lazy" decoding="async">
+          <figcaption>Reverse</figcaption>
+        </figure>
+      </div>
+      <div class="design-info">
+        <div>
+          <h3 class="street-name"></h3>
+          <p class="locality"></p>
+        </div>
+        <span class="design-code"></span>
+      </div>
+      <button class="select-design" type="button">Choose this design</button>
+      <p class="selection-note" hidden></p>
+    </article>
+  </template>
+
+  <footer>
+    <p>Every listed design has passed asset validation before appearing here.</p>
+  </footer>
+
+  <script src="/config.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
