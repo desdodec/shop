@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Find your Hebden Bridge street by street name, postcode or Design ID and preview its Street Face mug design.">
+  <meta name="description" content="Start typing a Hebden Bridge street name and find its Street Face mug design instantly.">
   <title>Find Your Street | Street Face</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -17,39 +17,38 @@
     <section class="hero" aria-labelledby="hero-title">
       <p class="eyebrow">A mug built around somewhere that matters</p>
       <h1 id="hero-title">Find Your Street</h1>
-      <p class="hero-copy">Search the Hebden Bridge collection by street name, postcode or Design ID. Choose one or more designs, then keep the exact Design IDs for checkout.</p>
+      <p class="hero-copy">Start typing the name of your street. Matching Hebden Bridge streets appear straight away — choose yours to see the mug design.</p>
 
       <form id="search-form" class="search" role="search">
-        <label for="search-input">Street name, postcode or Design ID</label>
+        <label for="search-input">Street name</label>
         <div class="search-row">
           <input
             id="search-input"
             name="q"
             type="search"
             inputmode="search"
-            autocomplete="postal-code"
-            placeholder="e.g. Blenheim Street, HX7 8… or HB-0024"
+            autocomplete="off"
+            placeholder="e.g. Burnley Road"
             maxlength="100"
+            aria-describedby="search-help"
           >
-          <button type="submit">Search</button>
+          <button type="submit">Find street</button>
         </div>
+        <p id="search-help" class="search-help">You only need a few letters — try “burn” for Burnley Road.</p>
       </form>
 
       <div class="search-meta">
-        <div id="status" class="status" role="status" aria-live="polite"></div>
-        <button id="clear-search" class="text-button" type="button" hidden>Clear search</button>
+        <div id="status" class="status" role="status" aria-live="polite">Start typing to find a street.</div>
+        <button id="clear-search" class="text-button" type="button" hidden>Clear</button>
       </div>
     </section>
 
     <section class="results-wrap" aria-labelledby="results-title">
       <div class="results-heading">
-        <h2 id="results-title">Street designs</h2>
+        <h2 id="results-title">Matching streets</h2>
         <span id="result-count" class="result-count"></span>
       </div>
       <div id="results" class="results"></div>
-      <div class="load-more-wrap">
-        <button id="load-more" class="secondary-button" type="button" hidden>Show more streets</button>
-      </div>
     </section>
   </main>
 
