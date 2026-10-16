@@ -17,13 +17,9 @@ function responseHeaders(object) {
   return headers;
 }
 
-function isAllowedKey(key) {
-  return PUBLIC_PREFIXES.some((prefix) => key.startsWith(prefix));
-}
-
-function badRequest(message, status = 400) {
-  return new Response(message, {
-    status,
+function notFound() {
+  return new Response("Not found", {
+    status: 404,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       ...corsHeaders(),
@@ -31,45 +27,52 @@ function badRequest(message, status = 400) {
   });
 }
 
+function methodNotAllowed() {
+  return new Response("Method not allowed", {
+    status: 405,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      Allow: "GET, HEAD, OPTIONS",
+      ...corsHeaders(),
+    },
+  });
+}
+
+function parseKey(pathname) {
+  try {
+    const key = decodeURIComponent(pathname.replace(/^\/+/, ""));
+    if (!key || key.includes("..") || key.includes("\\")) return null;
+    return PUBLIC_PREFIXES.some((prefix) => key.startsWith(prefix)) ? key : null;
+  } catch {
+    return null;
+  }
+}
+
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
     if (request.method !== "GET" && request.method !== "HEAD") {
-      return badRequest("Method not allowed", 405);
+      return methodNotAllowed();
     }
 
-    const key = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
-
-    if (!key || key.includes("..") || !isAllowedKey(key)) {
-      return badRequest("Not found", 404);
-    }
-
-    const object = await env.MUG_ASSETS.get(key, {
-      onlyIf: request.headers,
-    });
-
-    if (object === null) {
-      return badRequest("Not found", 404);
-    }
-
-    const headers = responseHeaders(object);
-
-    if (object.range) {
-      headers.set("Content-Range", `bytes ${object.range.offset}-${object.range.end ?? object.range.offset + object.range.length - 1}/${object.size}`);
-    }
+    const key = parseKey(new URL(request.url).pathname);
+    if (!key) return notFound();
 
     if (request.method === "HEAD") {
-      return new Response(null, { status: 200, headers });
+      const object = await env.MUG_ASSETS.head(key);
+      if (object === null) return notFound();
+      return new Response(null, { status: 200, headers: responseHeaders(object) });
     }
 
+    const object = await env.MUG_ASSETS.get(key);
+    if (object === null) return notFound();
+
     return new Response(object.body, {
-      status: object.range ? 206 : 200,
-      headers,
+      status: 200,
+      headers: responseHeaders(object),
     });
   },
 };
