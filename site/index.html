@@ -17,7 +17,7 @@
     <section class="hero" aria-labelledby="hero-title">
       <p class="eyebrow">A mug built around somewhere that matters</p>
       <h1 id="hero-title">Find Your Street</h1>
-      <p class="hero-copy">Search the Hebden Bridge collection by street name or Design ID. Each street has its own map-derived face and matching reverse.</p>
+      <p class="hero-copy">Search the Hebden Bridge collection by street name or Design ID. Choose one or more designs, then keep the exact Design IDs for checkout.</p>
 
       <form id="search-form" class="search" role="search">
         <label for="search-input">Street name or Design ID</label>
@@ -27,7 +27,7 @@
             name="q"
             type="search"
             inputmode="search"
-            autocomplete="street-address"
+            autocomplete="off"
             placeholder="e.g. Blenheim Street or HB-0024"
             maxlength="100"
           >
@@ -35,7 +35,10 @@
         </div>
       </form>
 
-      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <div class="search-meta">
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <button id="clear-search" class="text-button" type="button" hidden>Clear search</button>
+      </div>
     </section>
 
     <section class="results-wrap" aria-labelledby="results-title">
@@ -46,6 +49,26 @@
       <div id="results" class="results"></div>
     </section>
   </main>
+
+  <aside id="selection-tray" class="selection-tray" aria-labelledby="selection-title" hidden>
+    <div class="selection-inner">
+      <div class="selection-heading">
+        <div>
+          <p class="selection-kicker">Your selected designs</p>
+          <h2 id="selection-title">Ready for checkout</h2>
+        </div>
+        <button id="clear-selection" class="text-button" type="button">Clear all</button>
+      </div>
+
+      <div id="selected-designs" class="selected-designs"></div>
+
+      <div class="selection-actions">
+        <button id="copy-design-ids" class="secondary-button" type="button">Copy Design IDs</button>
+        <button class="checkout-button" type="button" disabled aria-describedby="checkout-note">Continue to Etsy</button>
+      </div>
+      <p id="checkout-note" class="checkout-note">Etsy handoff will be connected next. Your selections are saved in this browser.</p>
+    </div>
+  </aside>
 
   <template id="design-template">
     <article class="design-card">
@@ -69,6 +92,16 @@
       <button class="select-design" type="button">Choose this design</button>
       <p class="selection-note" hidden></p>
     </article>
+  </template>
+
+  <template id="selected-design-template">
+    <div class="selected-design">
+      <div>
+        <strong class="selected-street"></strong>
+        <span class="selected-code"></span>
+      </div>
+      <button class="remove-selected" type="button" aria-label="Remove selected design">Remove</button>
+    </div>
   </template>
 
   <footer>
