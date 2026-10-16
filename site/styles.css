@@ -244,37 +244,71 @@ h1 {
 }
 
 .street-finder-option {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  border: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
   border-bottom: 1px solid #eee9df;
   background: #fff;
-  padding: 16px 18px;
-  color: #191919;
-  text-align: left;
 }
 
 .street-finder-option:last-child {
   border-bottom: 0;
 }
 
-.street-finder-option:hover,
-.street-finder-option:focus-visible {
+.street-finder-option.selected {
+  background: #f0ece3;
+}
+
+.street-finder-preview,
+.street-finder-choice {
+  border: 0;
+  background: transparent;
+  color: #191919;
+}
+
+.street-finder-preview {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  text-align: left;
+}
+
+.street-finder-preview:hover,
+.street-finder-preview:focus-visible {
   background: #f4f1ea;
   outline: none;
 }
 
-.street-finder-option span {
+.street-finder-preview span {
   font-size: 1.05rem;
   font-weight: 750;
 }
 
-.street-finder-option small {
+.street-finder-preview small {
   flex: none;
   color: #77736d;
+}
+
+.street-finder-choice {
+  min-width: 94px;
+  border-left: 1px solid #eee9df;
+  padding: 12px 16px;
+  font-weight: 750;
+}
+
+.street-finder-choice:hover,
+.street-finder-choice:focus-visible {
+  background: #191919;
+  color: #fff;
+  outline: none;
+}
+
+.street-finder-option.selected .street-finder-choice {
+  background: #191919;
+  color: #fff;
 }
 
 .design-card,
@@ -478,9 +512,19 @@ footer {
   }
 
   .street-finder-option {
+    grid-template-columns: minmax(0, 1fr) 92px;
+  }
+
+  .street-finder-preview {
     align-items: flex-start;
     flex-direction: column;
     gap: 2px;
+    padding: 14px;
+  }
+
+  .street-finder-choice {
+    min-width: 0;
+    padding-inline: 10px;
   }
 
   .selection-heading {
