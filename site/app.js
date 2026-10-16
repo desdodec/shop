@@ -49,6 +49,13 @@ function assetUrl(key) {
   return `${config.mockupBaseUrl}/${encoded}`;
 }
 
+function postcodeSectorFromFull(query) {
+  const compact = query.trim().toUpperCase().replace(/\s+/g, '');
+  if (!/^[A-Z]{1,2}[0-9][0-9A-Z]?[0-9][A-Z]{2}$/.test(compact)) return null;
+  const sectorCompact = compact.slice(0, -2);
+  return `${sectorCompact.slice(0, -1)} ${sectorCompact.slice(-1)}`;
+}
+
 async function searchCatalogue(searchText = '') {
   const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/search_catalogue`, {
     method: 'POST',
@@ -132,7 +139,18 @@ function render(items, query) {
   if (!items.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.innerHTML = '<h3>No matching street found</h3><p>Try a shorter street name or a Design ID such as HB-0024.</p>';
+
+    const sector = postcodeSectorFromFull(query);
+    if (sector) {
+      const heading = document.createElement('h3');
+      heading.textContent = 'No exact postcode match found';
+      const text = document.createElement('p');
+      text.textContent = `Try the postcode sector ${sector} to browse nearby streets, or search by street name.`;
+      empty.append(heading, text);
+    } else {
+      empty.innerHTML = '<h3>No matching street found</h3><p>Try a shorter street name, postcode sector, or a Design ID such as HB-0024.</p>';
+    }
+
     results.append(empty);
     return;
   }
