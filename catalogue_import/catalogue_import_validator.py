@@ -62,7 +62,7 @@ def required(name: str) -> str:
 def safe_name(name: str) -> str:
     value = name.strip().rstrip(".")
     value = re.sub(r"\s+", "_", value)
-    return re.sub(r"[^A-Za-z0-9_-]", "", value)
+    return re.sub(r"[^A-Za-z0-9_'-]", "", value)
 
 
 def keys(dataset_id: str, street_id: str, street_name: str):
