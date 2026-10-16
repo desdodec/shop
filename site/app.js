@@ -5,16 +5,17 @@ if (!config?.supabaseUrl || !config?.supabasePublishableKey || !config?.mockupBa
 }
 
 const STORAGE_KEY = 'street-face-selected-designs-v1';
-const PAGE_SIZE = 24;
+const SUGGESTION_LIMIT = 12;
+const TYPEAHEAD_DELAY_MS = 120;
 
 const form = document.querySelector('#search-form');
 const input = document.querySelector('#search-input');
 const results = document.querySelector('#results');
 const status = document.querySelector('#status');
 const resultCount = document.querySelector('#result-count');
+const resultsTitle = document.querySelector('#results-title');
 const template = document.querySelector('#design-template');
 const clearSearchButton = document.querySelector('#clear-search');
-const loadMoreButton = document.querySelector('#load-more');
 const selectionTray = document.querySelector('#selection-tray');
 const selectedDesignsContainer = document.querySelector('#selected-designs');
 const selectedDesignTemplate = document.querySelector('#selected-design-template');
@@ -22,9 +23,9 @@ const clearSelectionButton = document.querySelector('#clear-selection');
 const copyDesignIdsButton = document.querySelector('#copy-design-ids');
 
 let currentItems = [];
-let currentQuery = '';
-let hasMoreResults = false;
 let selectedDesigns = loadSelections();
+let debounceTimer = null;
+let requestVersion = 0;
 
 function loadSelections() {
   try {
@@ -53,18 +54,7 @@ function assetUrl(key) {
   return `${config.mockupBaseUrl}/${encoded}`;
 }
 
-function compactPostcodeQuery(query) {
-  return query.trim().toUpperCase().replace(/\s+/g, '');
-}
-
-function postcodeSectorFromFull(query) {
-  const compact = compactPostcodeQuery(query);
-  if (!/^[A-Z]{1,2}[0-9][0-9A-Z]?[0-9][A-Z]{2}$/.test(compact)) return null;
-  const sectorCompact = compact.slice(0, -2);
-  return `${sectorCompact.slice(0, -1)} ${sectorCompact.slice(-1)}`;
-}
-
-async function searchCatalogue(searchText = '', offset = 0, limit = PAGE_SIZE) {
+async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT) {
   const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/search_catalogue`, {
     method: 'POST',
     headers: {
@@ -74,7 +64,7 @@ async function searchCatalogue(searchText = '', offset = 0, limit = PAGE_SIZE) {
     body: JSON.stringify({
       search_text: searchText,
       result_limit: limit,
-      result_offset: offset,
+      result_offset: 0,
     }),
   });
 
@@ -139,7 +129,24 @@ function toggleSelection(item) {
   refreshVisibleCards();
 }
 
-function appendCard(item) {
+function updateUrl(query) {
+  const url = new URL(window.location.href);
+  if (query) {
+    url.searchParams.set('q', query);
+  } else {
+    url.searchParams.delete('q');
+  }
+  history.replaceState(null, '', url);
+}
+
+function renderDesign(item) {
+  currentItems = [item];
+  results.replaceChildren();
+  results.classList.remove('finder-results');
+  resultsTitle.textContent = 'Your street design';
+  resultCount.textContent = item.design_code;
+  status.textContent = `${item.street_name} selected.`;
+
   const fragment = template.content.cloneNode(true);
   const card = fragment.querySelector('.design-card');
   const front = fragment.querySelector('.front-image');
@@ -157,147 +164,126 @@ function appendCard(item) {
 
   updateCardSelection(card, item);
   button.addEventListener('click', () => toggleSelection(item));
-
   results.append(fragment);
+
+  input.value = item.street_name;
+  clearSearchButton.hidden = false;
+  updateUrl(item.street_name);
 }
 
-function updateResultMeta(query) {
-  const count = currentItems.length;
-  resultCount.textContent = `${count}${hasMoreResults ? '+' : ''} result${count === 1 && !hasMoreResults ? '' : 's'}`;
-  loadMoreButton.hidden = !hasMoreResults;
-
-  const fullPostcodeSector = postcodeSectorFromFull(query);
-  if (fullPostcodeSector && count > 0) {
-    status.textContent = `Showing exact postcode matches for “${query}”.`;
-  } else if (query) {
-    status.textContent = hasMoreResults
-      ? `Showing the first ${count} matches for “${query}”.`
-      : `Showing matches for “${query}”.`;
-  } else {
-    status.textContent = hasMoreResults
-      ? `Showing the first ${count} available streets.`
-      : 'Showing available streets.';
-  }
-}
-
-function renderEmptyState(query) {
-  const empty = document.createElement('div');
-  empty.className = 'empty-state';
-
-  const sector = postcodeSectorFromFull(query);
-  if (sector) {
-    const heading = document.createElement('h3');
-    heading.textContent = 'No exact postcode match found';
-
-    const text = document.createElement('p');
-    text.textContent = 'We do not have a confirmed street mapping for that full postcode.';
-
-    const sectorButton = document.createElement('button');
-    sectorButton.className = 'secondary-button empty-action';
-    sectorButton.type = 'button';
-    sectorButton.textContent = `Browse postcode sector ${sector}`;
-    sectorButton.addEventListener('click', () => setSearchQuery(sector));
-
-    empty.append(heading, text, sectorButton);
-  } else {
-    empty.innerHTML = '<h3>No matching street found</h3><p>Try a shorter street name, postcode sector, or a Design ID such as HB-0024.</p>';
-  }
-
-  results.append(empty);
-}
-
-function renderInitial(items, query) {
+function renderSuggestions(items, query) {
   currentItems = items;
   results.replaceChildren();
-  hasMoreResults = items.length === PAGE_SIZE;
+  results.classList.add('finder-results');
+  resultsTitle.textContent = 'Matching streets';
+  resultCount.textContent = `${items.length} match${items.length === 1 ? '' : 'es'}`;
 
   if (!items.length) {
-    hasMoreResults = false;
-    resultCount.textContent = '0 results';
-    loadMoreButton.hidden = true;
-    renderEmptyState(query);
-    const sector = postcodeSectorFromFull(query);
-    status.textContent = sector
-      ? `No exact postcode match for “${query}”.`
-      : `No matches for “${query}”.`;
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = '<h3>No matching street found</h3><p>Try fewer letters or a different spelling.</p>';
+    results.append(empty);
+    status.textContent = `No streets containing “${query}”.`;
     return;
   }
 
-  for (const item of items) appendCard(item);
-  updateResultMeta(query);
+  const list = document.createElement('div');
+  list.className = 'street-finder-list';
+
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.className = 'street-finder-option';
+    button.type = 'button';
+    button.innerHTML = `<span>${escapeHtml(item.street_name)}</span><small>${escapeHtml(item.locality || '')}</small>`;
+    button.addEventListener('click', () => renderDesign(item));
+    list.append(button);
+  }
+
+  results.append(list);
+  status.textContent = `Choose your street from ${items.length} match${items.length === 1 ? '' : 'es'}.`;
 }
 
-async function runSearch(query = '') {
-  currentQuery = query;
-  status.textContent = 'Searching…';
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function resetFinder() {
+  requestVersion += 1;
+  currentItems = [];
+  results.replaceChildren();
+  results.classList.add('finder-results');
+  resultsTitle.textContent = 'Matching streets';
   resultCount.textContent = '';
-  clearSearchButton.hidden = !query;
-  loadMoreButton.hidden = true;
+  status.textContent = 'Start typing to find a street.';
+  clearSearchButton.hidden = true;
+  updateUrl('');
+}
+
+async function runTypeahead(query) {
+  const trimmed = query.trim();
+  clearSearchButton.hidden = !trimmed;
+  updateUrl(trimmed);
+
+  if (trimmed.length < 2) {
+    currentItems = [];
+    results.replaceChildren();
+    resultsTitle.textContent = 'Matching streets';
+    resultCount.textContent = '';
+    status.textContent = trimmed.length === 1
+      ? 'Type one more letter to see matching streets.'
+      : 'Start typing to find a street.';
+    return;
+  }
+
+  const version = ++requestVersion;
+  status.textContent = 'Finding streets…';
   results.setAttribute('aria-busy', 'true');
 
   try {
-    const items = await searchCatalogue(query, 0, PAGE_SIZE);
-    renderInitial(items, query);
+    const items = await searchCatalogue(trimmed);
+    if (version !== requestVersion) return;
+    renderSuggestions(items, trimmed);
   } catch (error) {
+    if (version !== requestVersion) return;
     console.error(error);
     currentItems = [];
-    hasMoreResults = false;
     results.replaceChildren();
-    loadMoreButton.hidden = true;
-    status.textContent = 'The catalogue could not be loaded. Please try again.';
+    resultCount.textContent = '';
+    status.textContent = 'The street finder could not be loaded. Please try again.';
   } finally {
-    results.removeAttribute('aria-busy');
+    if (version === requestVersion) results.removeAttribute('aria-busy');
   }
 }
 
-async function loadMore() {
-  if (!hasMoreResults) return;
-
-  loadMoreButton.disabled = true;
-  loadMoreButton.textContent = 'Loading…';
-  results.setAttribute('aria-busy', 'true');
-
-  try {
-    const items = await searchCatalogue(currentQuery, currentItems.length, PAGE_SIZE);
-    for (const item of items) {
-      currentItems.push(item);
-      appendCard(item);
-    }
-    hasMoreResults = items.length === PAGE_SIZE;
-    updateResultMeta(currentQuery);
-  } catch (error) {
-    console.error(error);
-    status.textContent = 'More streets could not be loaded. Please try again.';
-  } finally {
-    results.removeAttribute('aria-busy');
-    loadMoreButton.disabled = false;
-    loadMoreButton.textContent = 'Show more streets';
-  }
+function scheduleTypeahead() {
+  window.clearTimeout(debounceTimer);
+  debounceTimer = window.setTimeout(() => runTypeahead(input.value), TYPEAHEAD_DELAY_MS);
 }
 
-function setSearchQuery(query) {
-  input.value = query;
-  const url = new URL(window.location.href);
-  if (query) {
-    url.searchParams.set('q', query);
-  } else {
-    url.searchParams.delete('q');
-  }
-  history.replaceState(null, '', url);
-  runSearch(query);
-}
+input.addEventListener('input', scheduleTypeahead);
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
-  setSearchQuery(input.value.trim());
+  window.clearTimeout(debounceTimer);
+
+  if (currentItems.length === 1) {
+    renderDesign(currentItems[0]);
+    return;
+  }
+
+  runTypeahead(input.value);
 });
 
 clearSearchButton.addEventListener('click', () => {
-  setSearchQuery('');
+  input.value = '';
+  resetFinder();
   input.focus();
 });
-
-loadMoreButton.addEventListener('click', loadMore);
 
 clearSelectionButton.addEventListener('click', () => {
   selectedDesigns = [];
@@ -322,4 +308,9 @@ copyDesignIdsButton.addEventListener('click', async () => {
 const initialQuery = new URL(window.location.href).searchParams.get('q')?.trim() ?? '';
 input.value = initialQuery;
 renderSelectionTray();
-runSearch(initialQuery);
+
+if (initialQuery) {
+  runTypeahead(initialQuery);
+} else {
+  resetFinder();
+}
