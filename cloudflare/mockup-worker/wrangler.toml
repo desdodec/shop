@@ -1,0 +1,8 @@
+name = "shop-mockup-delivery"
+main = "src/index.js"
+compatibility_date = "2026-10-16"
+
+[[r2_buckets]]
+binding = "MUG_ASSETS"
+bucket_name = "mug-print-assets"
+preview_bucket_name = "mug-print-assets"
