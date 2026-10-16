@@ -5,9 +5,13 @@
 -- we do not have enough evidence to attach a particular full postcode to a street.
 --
 -- Search behaviour:
---   * full postcode + exact matches -> return only exact matches
---   * full postcode + no exact matches -> fall back to its postcode sector
---   * partial postcode / sector -> return sector-discovery matches
+--   * full postcode -> exact mappings only
+--   * partial postcode / sector -> broader sector discovery
+--   * street name / Design ID -> unchanged
+--
+-- A full postcode that has no exact mapping returns no postcode-derived results.
+-- The storefront can then invite the customer to try the shorter sector instead
+-- of silently showing unrelated streets from the whole sector.
 
 begin;
 
@@ -50,30 +54,12 @@ as $$
             btrim(coalesce(search_text, '')) as raw,
             upper(replace(btrim(coalesce(search_text, '')), ' ', '')) as compact
     ),
-    query_base as (
+    query as (
         select
             raw,
             compact,
-            compact ~ '^[A-Z]{1,2}[0-9][0-9A-Z]?[0-9][A-Z]{2}$' as is_full_postcode,
-            case
-                when compact ~ '^[A-Z]{1,2}[0-9][0-9A-Z]?[0-9][A-Z]{2}$'
-                    then left(compact, length(compact) - 2)
-                else compact
-            end as postcode_prefix
+            compact ~ '^[A-Z]{1,2}[0-9][0-9A-Z]?[0-9][A-Z]{2}$' as is_full_postcode
         from normalized
-    ),
-    query as (
-        select
-            qb.*,
-            (
-                qb.is_full_postcode
-                and exists (
-                    select 1
-                    from public.design_postcodes p
-                    where upper(replace(btrim(p.postcode), ' ', '')) = qb.compact
-                )
-            ) as has_exact_postcode_matches
-        from query_base qb
     )
     select
         d.design_code,
@@ -94,33 +80,29 @@ as $$
         or d.street_name ilike '%' || q.raw || '%'
         or d.design_code ilike '%' || q.raw || '%'
         or (
-            q.compact <> ''
+            q.is_full_postcode
+            and exists (
+                select 1
+                from public.design_postcodes p
+                where p.design_id = d.id
+                  and upper(replace(btrim(p.postcode), ' ', '')) = q.compact
+            )
+        )
+        or (
+            not q.is_full_postcode
+            and q.compact <> ''
             and (
-                (
-                    q.has_exact_postcode_matches
-                    and exists (
-                        select 1
-                        from public.design_postcodes p
-                        where p.design_id = d.id
-                          and upper(replace(btrim(p.postcode), ' ', '')) = q.compact
-                    )
+                exists (
+                    select 1
+                    from public.design_postcodes p
+                    where p.design_id = d.id
+                      and upper(replace(btrim(p.postcode), ' ', '')) like q.compact || '%'
                 )
-                or (
-                    not q.has_exact_postcode_matches
-                    and (
-                        exists (
-                            select 1
-                            from public.design_postcodes p
-                            where p.design_id = d.id
-                              and upper(replace(btrim(p.postcode), ' ', '')) like q.postcode_prefix || '%'
-                        )
-                        or exists (
-                            select 1
-                            from public.design_postcode_sectors s
-                            where s.design_id = d.id
-                              and upper(replace(btrim(s.sector), ' ', '')) like q.postcode_prefix || '%'
-                        )
-                    )
+                or exists (
+                    select 1
+                    from public.design_postcode_sectors s
+                    where s.design_id = d.id
+                      and upper(replace(btrim(s.sector), ' ', '')) like q.compact || '%'
                 )
             )
         )
@@ -128,7 +110,7 @@ as $$
     order by
       case
         when upper(d.design_code) = upper(q.raw) then 0
-        when q.has_exact_postcode_matches and exists (
+        when q.is_full_postcode and exists (
             select 1
             from public.design_postcodes p
             where p.design_id = d.id
@@ -136,17 +118,17 @@ as $$
         ) then 1
         when lower(d.street_name) = lower(q.raw) then 2
         when lower(d.street_name) like lower(q.raw) || '%' then 3
-        when not q.has_exact_postcode_matches and q.postcode_prefix <> '' and exists (
+        when not q.is_full_postcode and q.compact <> '' and exists (
             select 1
             from public.design_postcode_sectors s
             where s.design_id = d.id
-              and upper(replace(btrim(s.sector), ' ', '')) like q.postcode_prefix || '%'
+              and upper(replace(btrim(s.sector), ' ', '')) like q.compact || '%'
         ) then 4
-        when not q.has_exact_postcode_matches and q.postcode_prefix <> '' and exists (
+        when not q.is_full_postcode and q.compact <> '' and exists (
             select 1
             from public.design_postcodes p
             where p.design_id = d.id
-              and upper(replace(btrim(p.postcode), ' ', '')) like q.postcode_prefix || '%'
+              and upper(replace(btrim(p.postcode), ' ', '')) like q.compact || '%'
         ) then 5
         else 6
       end,
@@ -163,6 +145,6 @@ comment on table public.design_postcode_sectors is
 'Internal postcode-sector discovery mappings. Broader than full postcode mappings and never returned by the public RPC.';
 
 comment on function public.search_catalogue(text, integer, integer) is
-'Browser-safe catalogue search. Exact full postcode matches take priority; sector discovery is used only when no exact postcode mapping exists or when the user enters a partial postcode/sector.';
+'Browser-safe catalogue search. Full postcodes use exact mappings only; partial postcode/sector input uses broader discovery mappings. Returns only public mockup metadata.';
 
 commit;
