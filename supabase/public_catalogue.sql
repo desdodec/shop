@@ -6,6 +6,7 @@
 --   * production_key is never returned
 --   * only active designs with validated assets are returned
 --   * postcode mappings are searchable but never returned directly
+--   * full postcode queries fall back to their postcode sector for discovery
 --   * the function is read-only and has a fixed search_path
 
 begin;
@@ -34,10 +35,23 @@ stable
 security definer
 set search_path = public
 as $$
-    with query as (
+    with normalized as (
         select
             btrim(coalesce(search_text, '')) as raw,
             upper(regexp_replace(btrim(coalesce(search_text, '')), '\\s+', '', 'g')) as compact
+    ),
+    query as (
+        select
+            raw,
+            compact,
+            case
+                -- A full UK postcode ends with digit + two letters in the inward code.
+                -- For discovery, reduce HX75LL -> HX75 (sector HX7 5).
+                when compact ~ '^[A-Z]{1,2}[0-9][0-9A-Z]?[0-9][A-Z]{2}$'
+                    then left(compact, length(compact) - 2)
+                else compact
+            end as postcode_prefix
+        from normalized
     )
     select
         d.design_code,
@@ -57,11 +71,14 @@ as $$
         q.raw = ''
         or d.street_name ilike '%' || q.raw || '%'
         or d.design_code ilike '%' || q.raw || '%'
-        or exists (
-            select 1
-            from public.design_postcodes p
-            where p.design_id = d.id
-              and p.postcode_normalized like '%' || q.compact || '%'
+        or (
+            q.postcode_prefix <> ''
+            and exists (
+                select 1
+                from public.design_postcodes p
+                where p.design_id = d.id
+                  and p.postcode_normalized like q.postcode_prefix || '%'
+            )
         )
       )
     order by
@@ -75,11 +92,11 @@ as $$
         ) then 1
         when lower(d.street_name) = lower(q.raw) then 2
         when lower(d.street_name) like lower(q.raw) || '%' then 3
-        when exists (
+        when q.postcode_prefix <> '' and exists (
             select 1
             from public.design_postcodes p
             where p.design_id = d.id
-              and p.postcode_normalized like q.compact || '%'
+              and p.postcode_normalized like q.postcode_prefix || '%'
         ) then 4
         else 5
       end,
@@ -93,6 +110,6 @@ revoke all on function public.search_catalogue(text, integer, integer) from publ
 grant execute on function public.search_catalogue(text, integer, integer) to anon, authenticated;
 
 comment on function public.search_catalogue(text, integer, integer) is
-'Browser-safe catalogue search by street name, Design ID, or postcode. Returns only public mockup metadata.';
+'Browser-safe catalogue search by street name, Design ID, or postcode. Full postcode input falls back to postcode-sector discovery. Returns only public mockup metadata.';
 
 commit;
