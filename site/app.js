@@ -85,6 +85,21 @@ function updateCardSelection(card, item) {
   button.setAttribute('aria-pressed', String(selected));
 }
 
+function updateFinderSelection(option, item) {
+  const selected = isSelected(item.design_code);
+  const chooseButton = option.querySelector('.street-finder-choice');
+
+  option.classList.toggle('selected', selected);
+  chooseButton.textContent = selected ? 'Selected' : 'Choose';
+  chooseButton.setAttribute('aria-pressed', String(selected));
+  chooseButton.setAttribute(
+    'aria-label',
+    selected
+      ? `Remove ${item.street_name} from selected designs`
+      : `Choose ${item.street_name}`,
+  );
+}
+
 function renderSelectionTray() {
   selectedDesignsContainer.replaceChildren();
   selectionTray.hidden = selectedDesigns.length === 0;
@@ -110,6 +125,14 @@ function refreshVisibleCards() {
   });
 }
 
+function refreshFinderSelections() {
+  const options = results.querySelectorAll('.street-finder-option');
+  options.forEach((option, index) => {
+    const item = currentItems[index];
+    if (item) updateFinderSelection(option, item);
+  });
+}
+
 function toggleSelection(item) {
   if (isSelected(item.design_code)) {
     selectedDesigns = selectedDesigns.filter((selected) => selected.design_code !== item.design_code);
@@ -127,6 +150,7 @@ function toggleSelection(item) {
   saveSelections();
   renderSelectionTray();
   refreshVisibleCards();
+  refreshFinderSelections();
 }
 
 function updateUrl(query) {
@@ -145,7 +169,7 @@ function renderDesign(item) {
   results.classList.remove('finder-results');
   resultsTitle.textContent = 'Your street design';
   resultCount.textContent = item.design_code;
-  status.textContent = `${item.street_name} selected.`;
+  status.textContent = `${item.street_name} selected for preview.`;
 
   const fragment = template.content.cloneNode(true);
   const card = fragment.querySelector('.design-card');
@@ -191,16 +215,30 @@ function renderSuggestions(items, query) {
   list.className = 'street-finder-list';
 
   for (const item of items) {
-    const button = document.createElement('button');
-    button.className = 'street-finder-option';
-    button.type = 'button';
-    button.innerHTML = `<span>${escapeHtml(item.street_name)}</span><small>${escapeHtml(item.locality || '')}</small>`;
-    button.addEventListener('click', () => renderDesign(item));
-    list.append(button);
+    const option = document.createElement('div');
+    option.className = 'street-finder-option';
+
+    const details = document.createElement('button');
+    details.className = 'street-finder-preview';
+    details.type = 'button';
+    details.innerHTML = `<span>${escapeHtml(item.street_name)}</span><small>${escapeHtml(item.locality || '')}</small>`;
+    details.setAttribute('aria-label', `Preview ${item.street_name}`);
+    details.addEventListener('click', () => renderDesign(item));
+
+    const chooseButton = document.createElement('button');
+    chooseButton.className = 'street-finder-choice';
+    chooseButton.type = 'button';
+    chooseButton.addEventListener('click', () => toggleSelection(item));
+
+    option.append(details, chooseButton);
+    updateFinderSelection(option, item);
+    list.append(option);
   }
 
   results.append(list);
-  status.textContent = `Choose your street from ${items.length} match${items.length === 1 ? '' : 'es'}.`;
+  status.textContent = items.length === 1
+    ? 'Choose the street, or preview the mug design.'
+    : `Choose one or more streets from ${items.length} matches, or tap a street name to preview it.`;
 }
 
 function escapeHtml(value) {
@@ -290,6 +328,7 @@ clearSelectionButton.addEventListener('click', () => {
   saveSelections();
   renderSelectionTray();
   refreshVisibleCards();
+  refreshFinderSelections();
 });
 
 copyDesignIdsButton.addEventListener('click', async () => {
