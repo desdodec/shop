@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import re
 from collections import defaultdict
@@ -47,9 +46,7 @@ def normalize_postcode(value: str) -> str:
 
 def sector_from_postcode(value: str) -> str:
     compact = normalize_postcode(value)
-    # UK inward code is one digit + two letters; sector keeps the inward digit.
     sector_compact = compact[:-2]
-    # Put a display space before the inward digit.
     return f"{sector_compact[:-1]} {sector_compact[-1]}"
 
 
@@ -95,17 +92,15 @@ def sector_stats(street: dict) -> dict[str, dict[str, float]]:
 def choose_sectors(street: dict) -> list[str]:
     """Choose discovery sectors from grouped nearby postcode evidence.
 
-    Sector-level evidence is intentionally broader than exact postcode evidence.
-    A sector qualifies when its candidates collectively show useful proximity:
+    The strongest qualifying sector is always retained. A secondary sector is
+    retained only when its evidence is genuinely comparable to the strongest one:
 
-      * at least one candidate is within 150 m, and
-      * either total sample hits across the sector >= 2, or at least two
-        candidate postcodes from that sector are within 150 m.
+      * at least 70% as many aggregate sample hits, and
+      * nearest candidate no more than 40 m farther away than the best sector, and
+      * at least two nearby candidate postcodes from that sector.
 
-    Among qualifying sectors we keep those with substantial evidence relative to
-    the strongest sector, capped at three. If none qualifies, a conservative
-    fallback accepts the single closest sector only when it is within 200 m. This
-    is safe for discovery because the customer still chooses the actual street.
+    This deliberately rejects weak neighbouring-sector bleed while still allowing
+    a genuinely boundary-spanning street to map to more than one sector.
     """
     grouped = sector_stats(street)
     if not grouped:
@@ -137,14 +132,21 @@ def choose_sectors(street: dict) -> list[str]:
         )
     )
 
-    best_total_hits = eligible[0][1]["total_hits"]
-    threshold = max(2, math.ceil(best_total_hits * 0.4))
-    chosen = [
-        sector
-        for sector, stats in eligible
-        if stats["total_hits"] >= threshold
-    ]
-    return chosen[:3]
+    best_sector, best_stats = eligible[0]
+    chosen = [best_sector]
+    best_hits = float(best_stats["total_hits"])
+    best_distance = float(best_stats["min_distance"])
+
+    for sector, stats in eligible[1:]:
+        comparable_hits = float(stats["total_hits"]) >= best_hits * 0.70
+        comparable_distance = float(stats["min_distance"]) <= best_distance + 40.0
+        enough_close_candidates = int(stats["close_candidates"]) >= 2
+        if comparable_hits and comparable_distance and enough_close_candidates:
+            chosen.append(sector)
+        if len(chosen) >= 3:
+            break
+
+    return chosen
 
 
 def main() -> int:
