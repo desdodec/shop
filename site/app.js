@@ -7,6 +7,7 @@ if (!config?.supabaseUrl || !config?.supabasePublishableKey || !config?.mockupBa
 const STORAGE_KEY = 'street-face-selected-designs-v1';
 const SUGGESTION_LIMIT = 12;
 const TYPEAHEAD_DELAY_MS = 120;
+const MAP_PAGE_SIZE = 50;
 
 const form = document.querySelector('#search-form');
 const input = document.querySelector('#search-input');
@@ -21,11 +22,15 @@ const selectedDesignsContainer = document.querySelector('#selected-designs');
 const selectedDesignTemplate = document.querySelector('#selected-design-template');
 const clearSelectionButton = document.querySelector('#clear-selection');
 const copyDesignIdsButton = document.querySelector('#copy-design-ids');
+const mapElement = document.querySelector('#street-map');
+const mapStatus = document.querySelector('#map-status');
 
 let currentItems = [];
 let selectedDesigns = loadSelections();
 let debounceTimer = null;
 let requestVersion = 0;
+let streetMap = null;
+const mapLayersByDesignCode = new Map();
 
 function loadSelections() {
   try {
@@ -54,7 +59,7 @@ function assetUrl(key) {
   return `${config.mockupBaseUrl}/${encoded}`;
 }
 
-async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT) {
+async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT, offset = 0) {
   const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/search_catalogue`, {
     method: 'POST',
     headers: {
@@ -64,7 +69,7 @@ async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT) {
     body: JSON.stringify({
       search_text: searchText,
       result_limit: limit,
-      result_offset: 0,
+      result_offset: offset,
     }),
   });
 
@@ -74,6 +79,20 @@ async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT) {
   }
 
   return response.json();
+}
+
+async function loadAllCatalogueItems() {
+  const items = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await searchCatalogue('', MAP_PAGE_SIZE, offset);
+    items.push(...page);
+    if (page.length < MAP_PAGE_SIZE) break;
+    offset += page.length;
+  }
+
+  return items;
 }
 
 function updateCardSelection(card, item) {
@@ -98,6 +117,24 @@ function updateFinderSelection(option, item) {
       ? `Remove ${item.street_name} from selected designs`
       : `Choose ${item.street_name}`,
   );
+}
+
+function mapLineStyle(item) {
+  const selected = isSelected(item.design_code);
+  return {
+    color: selected ? '#8c3f22' : '#191919',
+    weight: selected ? 8 : 6,
+    opacity: selected ? 1 : 0.78,
+  };
+}
+
+function refreshMapSelections() {
+  for (const [designCode, layers] of mapLayersByDesignCode.entries()) {
+    const item = { design_code: designCode };
+    for (const layer of layers) {
+      layer.setStyle(mapLineStyle(item));
+    }
+  }
 }
 
 function renderSelectionTray() {
@@ -151,6 +188,7 @@ function toggleSelection(item) {
   renderSelectionTray();
   refreshVisibleCards();
   refreshFinderSelections();
+  refreshMapSelections();
 }
 
 function updateUrl(query) {
@@ -163,7 +201,7 @@ function updateUrl(query) {
   history.replaceState(null, '', url);
 }
 
-function renderDesign(item) {
+function renderDesign(item, { scroll = false } = {}) {
   currentItems = [item];
   results.replaceChildren();
   results.classList.remove('finder-results');
@@ -193,6 +231,10 @@ function renderDesign(item) {
   input.value = item.street_name;
   clearSearchButton.hidden = false;
   updateUrl(item.street_name);
+
+  if (scroll) {
+    document.querySelector('.results-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 function renderSuggestions(items, query) {
@@ -298,6 +340,94 @@ async function runTypeahead(query) {
   }
 }
 
+function designStreetId(item) {
+  const match = /^HB-(\d{4})$/.exec(item.design_code || '');
+  return match ? Number(match[1]) : null;
+}
+
+async function initialiseStreetMap() {
+  if (!mapElement || !mapStatus) return;
+  if (!window.L) {
+    mapStatus.textContent = 'The map could not be loaded. Use the street finder below.';
+    return;
+  }
+
+  try {
+    const [geojsonResponse, catalogueItems] = await Promise.all([
+      fetch('/data/hebden_bridge_streets.geojson'),
+      loadAllCatalogueItems(),
+    ]);
+
+    if (!geojsonResponse.ok) {
+      throw new Error(`Street map data failed (${geojsonResponse.status})`);
+    }
+
+    const geojson = await geojsonResponse.json();
+    const catalogueByStreetId = new Map();
+
+    for (const item of catalogueItems) {
+      const streetId = designStreetId(item);
+      if (streetId !== null) catalogueByStreetId.set(streetId, item);
+    }
+
+    const availableFeatures = geojson.features
+      .map((feature, index) => {
+        const item = catalogueByStreetId.get(index);
+        if (!item) return null;
+        return {
+          ...feature,
+          properties: {
+            ...feature.properties,
+            catalogueItem: item,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    if (!availableFeatures.length) {
+      throw new Error('No available street features were found.');
+    }
+
+    streetMap = window.L.map(mapElement, {
+      scrollWheelZoom: false,
+      zoomControl: true,
+    });
+
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(streetMap);
+
+    const geoLayer = window.L.geoJSON(
+      { type: 'FeatureCollection', features: availableFeatures },
+      {
+        style: (feature) => mapLineStyle(feature.properties.catalogueItem),
+        onEachFeature: (feature, layer) => {
+          const item = feature.properties.catalogueItem;
+          const existing = mapLayersByDesignCode.get(item.design_code) || [];
+          existing.push(layer);
+          mapLayersByDesignCode.set(item.design_code, existing);
+
+          layer.bindTooltip(item.street_name, { sticky: true });
+          layer.on('mouseover', () => {
+            if (!isSelected(item.design_code)) layer.setStyle({ weight: 9, opacity: 1 });
+          });
+          layer.on('mouseout', () => layer.setStyle(mapLineStyle(item)));
+          layer.on('click', () => renderDesign(item, { scroll: true }));
+        },
+      },
+    ).addTo(streetMap);
+
+    streetMap.fitBounds(geoLayer.getBounds(), { padding: [18, 18] });
+    mapStatus.textContent = `${catalogueItems.length} street designs available`;
+  } catch (error) {
+    console.error(error);
+    mapStatus.textContent = 'The map could not be loaded. Use the street finder below.';
+    mapElement.classList.add('map-error');
+    mapElement.textContent = 'Street map unavailable';
+  }
+}
+
 function scheduleTypeahead() {
   window.clearTimeout(debounceTimer);
   debounceTimer = window.setTimeout(() => runTypeahead(input.value), TYPEAHEAD_DELAY_MS);
@@ -329,6 +459,7 @@ clearSelectionButton.addEventListener('click', () => {
   renderSelectionTray();
   refreshVisibleCards();
   refreshFinderSelections();
+  refreshMapSelections();
 });
 
 copyDesignIdsButton.addEventListener('click', async () => {
@@ -347,6 +478,7 @@ copyDesignIdsButton.addEventListener('click', async () => {
 const initialQuery = new URL(window.location.href).searchParams.get('q')?.trim() ?? '';
 input.value = initialQuery;
 renderSelectionTray();
+initialiseStreetMap();
 
 if (initialQuery) {
   runTypeahead(initialQuery);
