@@ -37,6 +37,15 @@ create table if not exists design_assets (
     unique(design_id, product_sku, version)
 );
 
+create table if not exists design_postcodes (
+    design_id uuid not null references designs(id) on delete cascade,
+    postcode text not null,
+    postcode_normalized text generated always as (upper(regexp_replace(postcode, '\\s+', '', 'g'))) stored,
+    created_at timestamptz not null default now(),
+    primary key (design_id, postcode),
+    check (length(btrim(postcode)) >= 2)
+);
+
 create table if not exists orders (
     id uuid primary key default gen_random_uuid(),
     etsy_receipt_id text unique,
@@ -56,6 +65,7 @@ create table if not exists orders (
 create index if not exists idx_designs_locality on designs(locality);
 create index if not exists idx_designs_street_name_lower on designs(lower(street_name));
 create index if not exists idx_designs_status on designs(status);
+create index if not exists idx_design_postcodes_normalized on design_postcodes(postcode_normalized);
 create index if not exists idx_orders_status on orders(status);
 create index if not exists idx_design_assets_product_sku on design_assets(product_sku);
 
