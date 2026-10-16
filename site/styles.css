@@ -226,6 +226,16 @@ h1 {
   gap: 18px;
 }
 
+.load-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding-top: 24px;
+}
+
+.load-more-wrap .secondary-button {
+  min-width: 220px;
+}
+
 .design-card,
 .empty-state {
   border: 1px solid #ddd7cc;
@@ -320,6 +330,10 @@ figure figcaption {
 .empty-state p {
   margin-bottom: 0;
   color: #66645e;
+}
+
+.empty-state .empty-action {
+  margin-top: 18px;
 }
 
 .selection-tray {
