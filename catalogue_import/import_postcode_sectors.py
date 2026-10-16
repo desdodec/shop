@@ -12,6 +12,10 @@ Exact postcode mappings remain conservative. Sector mappings are discovery-only:
 several different nearby full postcodes can collectively provide strong evidence
 for the same postcode sector even when no single full postcode is strong enough.
 
+Long streets are allowed to keep more than one credible sector because they can
+legitimately cross postcode-sector boundaries. Shorter streets use stricter
+secondary-sector rules to reduce neighbouring-sector bleed.
+
 No street-name matching is used for identity. By default this is a dry run; pass
 --apply to replace design_postcode_sectors rows for resolved designs.
 """
@@ -19,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 from collections import defaultdict
@@ -28,6 +33,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 UK_POSTCODE = re.compile(r"^(GIR ?0AA|(?:[A-Z]{1,2}[0-9][0-9A-Z]?)[ ]?[0-9][A-Z]{2})$", re.I)
+LONG_STREET_METRES = 800.0
 
 
 def required(name: str) -> str:
@@ -48,6 +54,37 @@ def sector_from_postcode(value: str) -> str:
     compact = normalize_postcode(value)
     sector_compact = compact[:-2]
     return f"{sector_compact[:-1]} {sector_compact[-1]}"
+
+
+def haversine_m(a: list[float], b: list[float]) -> float:
+    """Approximate distance between two [lon, lat] coordinates in metres."""
+    lon1, lat1 = map(math.radians, (float(a[0]), float(a[1])))
+    lon2, lat2 = map(math.radians, (float(b[0]), float(b[1])))
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 2 * 6_371_000.0 * math.asin(min(1.0, math.sqrt(h)))
+
+
+def geometry_length_m(geometry: dict | None) -> float:
+    """Return total line length for LineString or MultiLineString geometry."""
+    if not geometry:
+        return 0.0
+    geometry_type = geometry.get("type")
+    coordinates = geometry.get("coordinates") or []
+
+    if geometry_type == "LineString":
+        lines = [coordinates]
+    elif geometry_type == "MultiLineString":
+        lines = coordinates
+    else:
+        return 0.0
+
+    total = 0.0
+    for line in lines:
+        for a, b in zip(line, line[1:]):
+            total += haversine_m(a, b)
+    return total
 
 
 def sector_stats(street: dict) -> dict[str, dict[str, float]]:
@@ -89,18 +126,23 @@ def sector_stats(street: dict) -> dict[str, dict[str, float]]:
     return grouped
 
 
-def choose_sectors(street: dict) -> list[str]:
+def choose_sectors(street: dict, street_length_m: float) -> list[str]:
     """Choose discovery sectors from grouped nearby postcode evidence.
 
-    The strongest qualifying sector is always retained. A secondary sector is
-    retained only when its evidence is genuinely comparable to the strongest one:
+    The strongest qualifying sector is always retained.
 
-      * at least 70% as many aggregate sample hits, and
-      * nearest candidate no more than 40 m farther away than the best sector, and
-      * at least two nearby candidate postcodes from that sector.
+    Shorter streets use strict secondary-sector rules:
+      * at least 70% as many aggregate hits as the strongest sector,
+      * nearest candidate no more than 40 m farther away,
+      * at least two nearby candidate postcodes.
 
-    This deliberately rejects weak neighbouring-sector bleed while still allowing
-    a genuinely boundary-spanning street to map to more than one sector.
+    Long streets (>= 800 m) may legitimately cross a sector boundary, so a
+    secondary sector can survive with:
+      * at least 45% as many aggregate hits,
+      * nearest candidate no more than 75 m farther away,
+      * at least two nearby candidate postcodes.
+
+    A maximum of three sectors is retained.
     """
     grouped = sector_stats(street)
     if not grouped:
@@ -137,9 +179,13 @@ def choose_sectors(street: dict) -> list[str]:
     best_hits = float(best_stats["total_hits"])
     best_distance = float(best_stats["min_distance"])
 
+    is_long = street_length_m >= LONG_STREET_METRES
+    hit_ratio = 0.45 if is_long else 0.70
+    distance_allowance = 75.0 if is_long else 40.0
+
     for sector, stats in eligible[1:]:
-        comparable_hits = float(stats["total_hits"]) >= best_hits * 0.70
-        comparable_distance = float(stats["min_distance"]) <= best_distance + 40.0
+        comparable_hits = float(stats["total_hits"]) >= best_hits * hit_ratio
+        comparable_distance = float(stats["min_distance"]) <= best_distance + distance_allowance
         enough_close_candidates = int(stats["close_candidates"]) >= 2
         if comparable_hits and comparable_distance and enough_close_candidates:
             chosen.append(sector)
@@ -175,6 +221,7 @@ def main() -> int:
     skipped_no_sector = 0
     name_mismatches: list[str] = []
     burnley_debug: dict[str, dict[str, float]] | None = None
+    burnley_length_m: float | None = None
 
     for index, (street, feature) in enumerate(zip(streets, features)):
         street_id = f"{index:04d}"
@@ -190,10 +237,13 @@ def main() -> int:
             name_mismatches.append(f"{street_id}: candidate={candidate_name!r}, geo={geo_name!r}, design={design_name!r}")
             continue
 
+        length_m = geometry_length_m(feature.get("geometry"))
+
         if design_name.lower() == "burnley road":
             burnley_debug = sector_stats(street)
+            burnley_length_m = length_m
 
-        sectors = choose_sectors(street)
+        sectors = choose_sectors(street, length_m)
         if not sectors:
             skipped_no_sector += 1
             continue
@@ -221,6 +271,9 @@ def main() -> int:
         print(f"Burnley Road sectors:    {', '.join(burnley[0][3])}")
     else:
         print("Burnley Road sectors:    NONE")
+    if burnley_length_m is not None:
+        classification = "long" if burnley_length_m >= LONG_STREET_METRES else "short"
+        print(f"Burnley Road length:     {burnley_length_m:.0f} m ({classification})")
 
     if burnley_debug:
         print("Burnley Road evidence:")
