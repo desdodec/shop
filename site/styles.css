@@ -57,7 +57,8 @@ footer,
 .result-count,
 figure figcaption,
 .selection-kicker,
-.selected-code {
+.selected-code,
+.map-kicker {
   font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -71,13 +72,15 @@ footer,
 .status,
 .checkout-note,
 .selected-code,
-.search-help {
+.search-help,
+.map-status,
+.map-help {
   color: #66645e;
 }
 
 .hero {
   padding: clamp(56px, 9vw, 112px) 0 52px;
-  max-width: 840px;
+  max-width: 960px;
 }
 
 .eyebrow {
@@ -100,10 +103,78 @@ h1 {
 }
 
 .hero-copy {
-  max-width: 680px;
-  margin-bottom: 38px;
+  max-width: 720px;
+  margin-bottom: 34px;
   color: #4f4e49;
   font-size: clamp(1.05rem, 2vw, 1.28rem);
+}
+
+.map-panel {
+  margin-bottom: 44px;
+  border: 1px solid #d8d3c8;
+  border-radius: 24px;
+  background: #fff;
+  padding: 16px;
+}
+
+.map-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 4px 4px 14px;
+}
+
+.map-kicker {
+  margin-bottom: 4px;
+  font-weight: 750;
+}
+
+.map-heading h2,
+.finder-intro h2 {
+  margin-bottom: 0;
+  font-size: 1.35rem;
+  letter-spacing: -0.03em;
+}
+
+.map-status {
+  margin-bottom: 2px;
+  font-size: 0.86rem;
+  text-align: right;
+}
+
+.street-map {
+  width: 100%;
+  height: min(58vh, 520px);
+  min-height: 380px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #e9e5dc;
+}
+
+.street-map.map-error {
+  display: grid;
+  place-items: center;
+  color: #66645e;
+  font-weight: 700;
+}
+
+.map-help {
+  margin: 12px 4px 2px;
+  font-size: 0.86rem;
+}
+
+.finder-intro {
+  margin-bottom: 14px;
+}
+
+.leaflet-tooltip {
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(25, 25, 25, 0.14);
+  color: #191919;
+  font-weight: 750;
+  padding: 6px 10px;
 }
 
 .search label {
@@ -494,6 +565,21 @@ footer {
 
   .hero {
     padding-top: 36px;
+  }
+
+  .map-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .map-status {
+    text-align: left;
+  }
+
+  .street-map {
+    height: 56vh;
+    min-height: 330px;
   }
 
   .search-row,
