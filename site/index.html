@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Find your Hebden Bridge street and preview its Street Face mug design.">
+  <meta name="description" content="Find your Hebden Bridge street by street name, postcode or Design ID and preview its Street Face mug design.">
   <title>Find Your Street | Street Face</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -17,18 +17,18 @@
     <section class="hero" aria-labelledby="hero-title">
       <p class="eyebrow">A mug built around somewhere that matters</p>
       <h1 id="hero-title">Find Your Street</h1>
-      <p class="hero-copy">Search the Hebden Bridge collection by street name or Design ID. Choose one or more designs, then keep the exact Design IDs for checkout.</p>
+      <p class="hero-copy">Search the Hebden Bridge collection by street name, postcode or Design ID. Choose one or more designs, then keep the exact Design IDs for checkout.</p>
 
       <form id="search-form" class="search" role="search">
-        <label for="search-input">Street name or Design ID</label>
+        <label for="search-input">Street name, postcode or Design ID</label>
         <div class="search-row">
           <input
             id="search-input"
             name="q"
             type="search"
             inputmode="search"
-            autocomplete="off"
-            placeholder="e.g. Blenheim Street or HB-0024"
+            autocomplete="postal-code"
+            placeholder="e.g. Blenheim Street, HX7 8… or HB-0024"
             maxlength="100"
           >
           <button type="submit">Search</button>
