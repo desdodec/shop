@@ -9,7 +9,7 @@ if (
   || !config?.mockupBaseUrl
   || !collection?.id
   || !collection?.name
-  || !collection?.designCodePrefix
+  || !collection?.datasetId
   || !collection?.geojsonUrl
   || !collection?.mapStyle
 ) {
@@ -44,6 +44,7 @@ let debounceTimer = null;
 let requestVersion = 0;
 let streetMap = null;
 let mapPopup = null;
+let catalogueApiMode = 'unknown';
 const mapItemsByDesignCode = new Map();
 
 function applyCollectionCopy() {
@@ -84,26 +85,53 @@ function assetUrl(key) {
   return `${config.mockupBaseUrl}/${encoded}`;
 }
 
-async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT, offset = 0) {
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/search_catalogue`, {
+async function catalogueRequest(payload) {
+  return fetch(`${config.supabaseUrl}/rest/v1/rpc/search_catalogue`, {
     method: 'POST',
     headers: {
       apikey: config.supabasePublishableKey,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      search_text: searchText,
-      result_limit: limit,
-      result_offset: offset,
-    }),
+    body: JSON.stringify(payload),
   });
+}
 
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`Catalogue request failed (${response.status}): ${detail}`);
+async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT, offset = 0) {
+  const common = {
+    search_text: searchText,
+    result_limit: limit,
+    result_offset: offset,
+  };
+
+  if (catalogueApiMode !== 'legacy') {
+    const scopedResponse = await catalogueRequest({
+      collection_dataset_id: collection.datasetId,
+      ...common,
+    });
+
+    if (scopedResponse.ok) {
+      catalogueApiMode = 'scoped';
+      return scopedResponse.json();
+    }
+
+    if (catalogueApiMode === 'scoped' || scopedResponse.status !== 404) {
+      const detail = await scopedResponse.text();
+      throw new Error(`Catalogue request failed (${scopedResponse.status}): ${detail}`);
+    }
+
+    // Deployment bridge only: an older Supabase project may not yet have the
+    // collection-scoped RPC. Keep the live pilot usable until public_catalogue.sql
+    // is applied, then all calls automatically switch to scoped mode.
+    catalogueApiMode = 'legacy';
+    console.warn('Collection-scoped catalogue RPC is not deployed yet; using temporary legacy compatibility mode.');
   }
 
-  return response.json();
+  const legacyResponse = await catalogueRequest(common);
+  if (!legacyResponse.ok) {
+    const detail = await legacyResponse.text();
+    throw new Error(`Catalogue request failed (${legacyResponse.status}): ${detail}`);
+  }
+  return legacyResponse.json();
 }
 
 async function loadAllCatalogueItems() {
@@ -123,7 +151,6 @@ async function loadAllCatalogueItems() {
 function updateCardSelection(card, item) {
   const button = card.querySelector('.select-design');
   const selected = isSelected(item.design_code);
-
   card.classList.toggle('selected', selected);
   button.textContent = selected ? 'Selected — remove' : 'Choose this design';
   button.setAttribute('aria-pressed', String(selected));
@@ -132,15 +159,12 @@ function updateCardSelection(card, item) {
 function updateFinderSelection(option, item) {
   const selected = isSelected(item.design_code);
   const chooseButton = option.querySelector('.street-finder-choice');
-
   option.classList.toggle('selected', selected);
   chooseButton.textContent = selected ? 'Selected' : 'Choose';
   chooseButton.setAttribute('aria-pressed', String(selected));
   chooseButton.setAttribute(
     'aria-label',
-    selected
-      ? `Remove ${item.street_name} from selected designs`
-      : `Choose ${item.street_name}`,
+    selected ? `Remove ${item.street_name} from selected designs` : `Choose ${item.street_name}`,
   );
 }
 
@@ -181,22 +205,19 @@ function renderSelectionTray() {
     const removeButton = fragment.querySelector('.remove-selected');
     removeButton.setAttribute('aria-label', `Remove ${item.street_name} (${item.design_code})`);
     removeButton.addEventListener('click', () => toggleSelection(item));
-
     selectedDesignsContainer.append(fragment);
   }
 }
 
 function refreshVisibleCards() {
-  const cards = results.querySelectorAll('.design-card');
-  cards.forEach((card, index) => {
+  results.querySelectorAll('.design-card').forEach((card, index) => {
     const item = currentItems[index];
     if (item) updateCardSelection(card, item);
   });
 }
 
 function refreshFinderSelections() {
-  const options = results.querySelectorAll('.street-finder-option');
-  options.forEach((option, index) => {
+  results.querySelectorAll('.street-finder-option').forEach((option, index) => {
     const item = currentItems[index];
     if (item) updateFinderSelection(option, item);
   });
@@ -215,6 +236,7 @@ function toggleSelection(item) {
       ...selectedDesigns,
       {
         design_code: item.design_code,
+        street_id: item.street_id,
         street_name: item.street_name,
         locality: item.locality,
       },
@@ -231,11 +253,8 @@ function toggleSelection(item) {
 
 function updateUrl(query) {
   const url = new URL(window.location.href);
-  if (query) {
-    url.searchParams.set('q', query);
-  } else {
-    url.searchParams.delete('q');
-  }
+  if (query) url.searchParams.set('q', query);
+  else url.searchParams.delete('q');
   history.replaceState(null, '', url);
 }
 
@@ -379,11 +398,21 @@ async function runTypeahead(query) {
 }
 
 function mapFeatureIndex(item) {
-  const code = String(item.design_code || '');
-  if (!code.startsWith(collection.designCodePrefix)) return null;
-  const suffix = code.slice(collection.designCodePrefix.length);
-  if (!/^\d+$/.test(suffix)) return null;
-  return Number(suffix);
+  const streetId = String(item.street_id ?? '').trim();
+  if (/^\d+$/.test(streetId)) return Number(streetId);
+
+  // Temporary deployment bridge only. The old public RPC did not return
+  // street_id, so preserve the existing Hebden Bridge map until the scoped RPC
+  // is deployed. Once deployed, street_id is always the authoritative bridge.
+  if (catalogueApiMode === 'legacy' && collection.designCodePrefix) {
+    const code = String(item.design_code || '');
+    if (code.startsWith(collection.designCodePrefix)) {
+      const suffix = code.slice(collection.designCodePrefix.length);
+      if (/^\d+$/.test(suffix)) return Number(suffix);
+    }
+  }
+
+  return null;
 }
 
 function extendBoundsFromCoordinates(bounds, coordinates) {
@@ -431,6 +460,7 @@ async function initialiseStreetMap() {
           properties: {
             ...feature.properties,
             design_code: item.design_code,
+            street_id: item.street_id ?? String(index),
             street_name: item.street_name,
           },
         };
@@ -611,8 +641,5 @@ input.value = initialQuery;
 renderSelectionTray();
 initialiseStreetMap();
 
-if (initialQuery) {
-  runTypeahead(initialQuery);
-} else {
-  resetFinder();
-}
+if (initialQuery) runTypeahead(initialQuery);
+else resetFinder();
