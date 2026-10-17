@@ -489,20 +489,31 @@ async function initialiseStreetMap() {
         const feature = event.features?.[0];
         if (!feature) return;
         const designCode = feature.properties?.design_code || '';
+        const streetName = feature.properties?.street_name || 'Available street';
+        const action = isSelected(designCode) ? 'Selected — click to remove' : 'Click to choose';
         streetMap.setFilter('hovered-street', ['==', ['get', 'design_code'], designCode]);
         mapPopup
           .setLngLat(event.lngLat)
-          .setText(feature.properties?.street_name || 'Available street')
+          .setText(`${streetName} · ${action}`)
           .addTo(streetMap);
       });
 
       streetMap.on('click', 'available-streets-hit-area', (event) => {
-        const designCode = event.features?.[0]?.properties?.design_code;
+        const feature = event.features?.[0];
+        const designCode = feature?.properties?.design_code;
         const item = mapItemsByDesignCode.get(designCode);
-        if (item) renderDesign(item, { scroll: true });
+        if (!item) return;
+
+        const wasSelected = isSelected(item.design_code);
+        toggleSelection(item);
+        mapStatus.textContent = `${catalogueItems.length} street designs available · ${selectedDesigns.length} selected`;
+        mapPopup
+          .setLngLat(event.lngLat)
+          .setText(`${item.street_name} · ${wasSelected ? 'Removed' : 'Selected'}`)
+          .addTo(streetMap);
       });
 
-      mapStatus.textContent = `${catalogueItems.length} street designs available`;
+      mapStatus.textContent = `${catalogueItems.length} street designs available${selectedDesigns.length ? ` · ${selectedDesigns.length} selected` : ''}`;
     });
 
     streetMap.on('error', (event) => {
@@ -548,6 +559,9 @@ clearSelectionButton.addEventListener('click', () => {
   refreshVisibleCards();
   refreshFinderSelections();
   refreshMapSelections();
+  if (mapItemsByDesignCode.size) {
+    mapStatus.textContent = `${mapItemsByDesignCode.size} street designs available`;
+  }
 });
 
 copyDesignIdsButton.addEventListener('click', async () => {
