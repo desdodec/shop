@@ -25,6 +25,9 @@ const MAP_PAGE_SIZE = 50;
 const form = document.querySelector('#search-form');
 const input = document.querySelector('#search-input');
 const results = document.querySelector('#results');
+const finderResults = document.querySelector('#finder-results');
+const finderMatches = document.querySelector('.finder-matches');
+const finderCount = document.querySelector('#finder-count');
 const status = document.querySelector('#status');
 const resultCount = document.querySelector('#result-count');
 const resultsTitle = document.querySelector('#results-title');
@@ -161,7 +164,7 @@ function updateCardSelection(card, item) {
   const button = card.querySelector('.select-design');
   const selected = isSelected(item.design_code);
   card.classList.toggle('selected', selected);
-  button.textContent = selected ? 'Selected — remove' : 'Choose this design';
+  button.textContent = selected ? 'Remove from my mugs' : 'Add to my mugs';
   button.setAttribute('aria-pressed', String(selected));
 }
 
@@ -239,7 +242,7 @@ function renderSelectionTray() {
 
     reviewButton.addEventListener('click', () => {
       if (!canPreview) return;
-      renderDesign(item, { scroll: true });
+      renderDesign(item);
     });
 
     const removeButton = fragment.querySelector('.remove-selected');
@@ -275,14 +278,14 @@ function hydrateSelectionsFromCatalogue(catalogueItems) {
 }
 
 function refreshVisibleCards() {
-  results.querySelectorAll('.design-card').forEach((card, index) => {
-    const item = currentItems[index];
+  results.querySelectorAll('.design-card').forEach((card) => {
+    const item = mapItemsByDesignCode.get(previewedDesignCode) ?? selectedDesigns.find((x) => x.design_code === previewedDesignCode);
     if (item) updateCardSelection(card, item);
   });
 }
 
 function refreshFinderSelections() {
-  results.querySelectorAll('.street-finder-option').forEach((option, index) => {
+  finderResults.querySelectorAll('.street-finder-option').forEach((option, index) => {
     const item = currentItems[index];
     if (item) updateFinderSelection(option, item);
   });
@@ -315,96 +318,86 @@ function updateUrl(query) {
   history.replaceState(null, '', url);
 }
 
-function renderDesign(item, { scroll = false } = {}) {
+function renderDesign(item) {
+  // An outstanding search must never replace a freshly chosen map preview.
+  requestVersion += 1;
+  window.clearTimeout(debounceTimer);
   previewedDesignCode = item.design_code;
-  currentItems = [item];
   results.replaceChildren();
-  results.classList.remove('finder-results');
-  resultsTitle.textContent = 'Large mug preview';
+  resultsTitle.textContent = 'Your mug preview';
   resultCount.textContent = item.design_code;
-  status.textContent = `${item.street_name} preview is ready.`;
 
   const fragment = template.content.cloneNode(true);
   const card = fragment.querySelector('.design-card');
+  fragment.querySelector('.street-name').textContent = item.street_name;
+  fragment.querySelector('.locality').textContent = item.locality || '';
+  fragment.querySelector('.design-code').textContent = item.design_code;
   const front = fragment.querySelector('.front-image');
   const rear = fragment.querySelector('.rear-image');
-  const button = fragment.querySelector('.select-design');
-
-  fragment.querySelector('.street-name').textContent = item.street_name;
-  fragment.querySelector('.locality').textContent = item.locality;
-  fragment.querySelector('.design-code').textContent = item.design_code;
-
   front.src = assetUrl(item.front_mockup_key);
-  front.alt = `${item.street_name} mug front preview`;
+  front.alt = `${item.street_name} front mug mockup`;
   rear.src = assetUrl(item.rear_mockup_key);
-  rear.alt = `${item.street_name} mug reverse preview`;
+  rear.alt = `${item.street_name} reverse mug mockup`;
+
+  const showView = (view) => {
+    card.querySelector('.front-view').hidden = view !== 'front';
+    card.querySelector('.rear-view').hidden = view !== 'rear';
+    for (const side of ['front', 'rear']) {
+      const button = card.querySelector(`.view-${side}`);
+      button.classList.toggle('is-active', side === view);
+      button.setAttribute('aria-pressed', String(side === view));
+    }
+  };
+  card.querySelector('.view-front').addEventListener('click', () => showView('front'));
+  card.querySelector('.view-rear').addEventListener('click', () => showView('rear'));
+  showView('front');
 
   updateCardSelection(card, item);
-  button.addEventListener('click', () => toggleSelection(item));
+  card.querySelector('.select-design').addEventListener('click', () => toggleSelection(item));
   results.append(fragment);
-
-  input.value = item.street_name;
-  clearSearchButton.hidden = false;
-  updateUrl(item.street_name);
   renderSelectionTray();
-
-  if (scroll) {
-    document.querySelector('.results-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
 }
 
 function renderSuggestions(items, query) {
-  if (items.length === 1) {
-    renderDesign(items[0], { scroll: true });
+  currentItems = items;
+  finderResults.replaceChildren();
+  finderMatches.hidden = !items.length;
+  finderCount.textContent = `${items.length} match${items.length === 1 ? '' : 'es'}`;
+
+  if (!items.length) {
+    status.textContent = `No streets containing “${query}”. Try fewer letters.`;
     return;
   }
 
-  previewedDesignCode = null;
-  currentItems = items;
-  results.replaceChildren();
-  results.classList.add('finder-results');
-  resultsTitle.textContent = 'Matching streets';
-  resultCount.textContent = `${items.length} match${items.length === 1 ? '' : 'es'}`;
-  renderSelectionTray();
-
-  if (!items.length) {
-    const empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.innerHTML = '<h3>No matching street found</h3><p>Try fewer letters or a different spelling.</p>';
-    results.append(empty);
-    status.textContent = `No streets containing “${query}”.`;
+  if (items.length === 1) {
+    renderDesign(items[0]);
+    status.textContent = `${items[0].street_name} — preview on the right.`;
     return;
   }
 
   const list = document.createElement('div');
   list.className = 'street-finder-list';
-
   for (const item of items) {
     const option = document.createElement('div');
     option.className = 'street-finder-option';
-
     const details = document.createElement('button');
     details.className = 'street-finder-preview';
     details.type = 'button';
     details.innerHTML = `<span>${escapeHtml(item.street_name)}</span><small>${escapeHtml(item.locality || '')}</small>`;
     details.setAttribute('aria-label', `Preview ${item.street_name}`);
-    details.addEventListener('click', () => renderDesign(item, { scroll: true }));
+    details.addEventListener('click', () => renderDesign(item));
 
     const chooseButton = document.createElement('button');
     chooseButton.className = 'street-finder-choice';
     chooseButton.type = 'button';
-    chooseButton.addEventListener('click', () => {
-      toggleSelection(item);
-      renderDesign(item, { scroll: true });
-    });
-
+    chooseButton.textContent = 'Preview';
+    chooseButton.setAttribute('aria-label', `Preview ${item.street_name} mug`);
+    chooseButton.addEventListener('click', () => renderDesign(item));
     option.append(details, chooseButton);
-    updateFinderSelection(option, item);
     list.append(option);
   }
-
-  results.append(list);
-  status.textContent = `Choose one or more streets from ${items.length} matches, or tap a street name to open its large preview.`;
+  finderResults.append(list);
+  status.textContent = 'Choose a street to preview its mug on the right.';
 }
 
 function escapeHtml(value) {
@@ -418,40 +411,31 @@ function escapeHtml(value) {
 
 function resetFinder() {
   requestVersion += 1;
-  previewedDesignCode = null;
   currentItems = [];
-  results.replaceChildren();
-  results.classList.add('finder-results');
-  resultsTitle.textContent = 'Matching streets';
-  resultCount.textContent = '';
-  status.textContent = 'Start typing to find a street.';
+  finderResults.replaceChildren();
+  finderMatches.hidden = true;
+  finderCount.textContent = '';
+  status.textContent = 'Start typing or click a street on the map.';
   clearSearchButton.hidden = true;
   updateUrl('');
-  renderSelectionTray();
 }
 
 async function runTypeahead(query) {
   const trimmed = query.trim();
   clearSearchButton.hidden = !trimmed;
   updateUrl(trimmed);
+  const version = ++requestVersion;
 
   if (trimmed.length < 2) {
-    previewedDesignCode = null;
     currentItems = [];
-    results.replaceChildren();
-    resultsTitle.textContent = 'Matching streets';
-    resultCount.textContent = '';
-    status.textContent = trimmed.length === 1
-      ? 'Type one more letter to see matching streets.'
-      : 'Start typing to find a street.';
-    renderSelectionTray();
+    finderResults.replaceChildren();
+    finderMatches.hidden = true;
+    status.textContent = trimmed.length === 1 ? 'Type one more letter.' : 'Start typing or click a street on the map.';
     return;
   }
 
-  const version = ++requestVersion;
   status.textContent = 'Finding streets…';
-  results.setAttribute('aria-busy', 'true');
-
+  finderResults.setAttribute('aria-busy', 'true');
   try {
     const items = await searchCatalogue(trimmed);
     if (version !== requestVersion) return;
@@ -459,12 +443,9 @@ async function runTypeahead(query) {
   } catch (error) {
     if (version !== requestVersion) return;
     console.error(error);
-    currentItems = [];
-    results.replaceChildren();
-    resultCount.textContent = '';
-    status.textContent = 'The street finder could not be loaded. Please try again.';
+    status.textContent = 'Street finder unavailable. Please try again.';
   } finally {
-    if (version === requestVersion) results.removeAttribute('aria-busy');
+    if (version === requestVersion) finderResults.removeAttribute('aria-busy');
   }
 }
 
@@ -621,7 +602,7 @@ async function initialiseStreetMap() {
         if (!feature) return;
         const designCode = feature.properties?.design_code || '';
         const streetName = feature.properties?.street_name || 'Available street';
-        const action = isSelected(designCode) ? 'Selected — click to remove' : 'Click to choose';
+        const action = 'Click to preview mug';
         streetMap.setFilter('hovered-street', ['==', ['get', 'design_code'], designCode]);
         mapPopup
           .setLngLat(event.lngLat)
@@ -635,12 +616,10 @@ async function initialiseStreetMap() {
         const item = mapItemsByDesignCode.get(designCode);
         if (!item) return;
 
-        const wasSelected = isSelected(item.design_code);
-        toggleSelection(item);
-        renderDesign(item, { scroll: true });
+        renderDesign(item);
         mapPopup
           .setLngLat(event.lngLat)
-          .setText(`${item.street_name} · ${wasSelected ? 'Removed' : 'Selected'}`)
+          .setText(`${item.street_name} · Preview on right`)
           .addTo(streetMap);
       });
 
@@ -670,7 +649,7 @@ form.addEventListener('submit', (event) => {
   window.clearTimeout(debounceTimer);
 
   if (currentItems.length === 1) {
-    renderDesign(currentItems[0], { scroll: true });
+    renderDesign(currentItems[0]);
     return;
   }
 
