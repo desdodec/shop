@@ -75,7 +75,8 @@
       <div class="selection-heading">
         <div>
           <p class="selection-kicker">Your selected designs</p>
-          <h2 id="selection-title">Ready for checkout</h2>
+          <h2 id="selection-title">Review your mugs</h2>
+          <p class="selection-help">Tap any selected mug to reopen its full preview.</p>
         </div>
         <button id="clear-selection" class="text-button" type="button">Clear all</button>
       </div>
@@ -116,10 +117,14 @@
 
   <template id="selected-design-template">
     <div class="selected-design">
-      <div>
-        <strong class="selected-street"></strong>
-        <span class="selected-code"></span>
-      </div>
+      <button class="review-selected" type="button">
+        <img class="selected-thumbnail" alt="" loading="lazy" decoding="async">
+        <span class="selected-copy">
+          <strong class="selected-street"></strong>
+          <span class="selected-code"></span>
+        </span>
+        <span class="review-label">Preview</span>
+      </button>
       <button class="remove-selected" type="button" aria-label="Remove selected design">Remove</button>
     </div>
   </template>
