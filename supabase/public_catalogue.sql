@@ -6,7 +6,8 @@
 --   * production_key is never returned
 --   * only active designs with validated assets are returned
 --   * postcode mappings are searchable but never returned directly
---   * full postcode queries fall back to their postcode sector for discovery
+--   * full postcode -> exact mappings only
+--   * partial postcode / sector -> broader discovery mappings
 --   * the function is read-only and has a fixed search_path
 
 begin;
@@ -14,6 +15,7 @@ begin;
 revoke all on table public.designs from anon, authenticated;
 revoke all on table public.design_assets from anon, authenticated;
 revoke all on table public.design_postcodes from anon, authenticated;
+revoke all on table public.design_postcode_sectors from anon, authenticated;
 revoke all on table public.orders from anon, authenticated;
 
 drop function if exists public.search_catalogue(text, integer, integer);
@@ -44,13 +46,7 @@ as $$
         select
             raw,
             compact,
-            case
-                -- A full UK postcode ends with digit + two letters in the inward code.
-                -- For discovery, reduce HX75LL -> HX75 (sector HX7 5).
-                when compact ~ '^[A-Z]{1,2}[0-9][0-9A-Z]?[0-9][A-Z]{2}$'
-                    then left(compact, length(compact) - 2)
-                else compact
-            end as postcode_prefix
+            compact ~ '^[A-Z]{1,2}[0-9][0-9A-Z]?[0-9][A-Z]{2}$' as is_full_postcode
         from normalized
     )
     select
@@ -72,19 +68,37 @@ as $$
         or d.street_name ilike '%' || q.raw || '%'
         or d.design_code ilike '%' || q.raw || '%'
         or (
-            q.postcode_prefix <> ''
+            q.is_full_postcode
             and exists (
                 select 1
                 from public.design_postcodes p
                 where p.design_id = d.id
-                  and upper(replace(btrim(p.postcode), ' ', '')) like q.postcode_prefix || '%'
+                  and upper(replace(btrim(p.postcode), ' ', '')) = q.compact
+            )
+        )
+        or (
+            not q.is_full_postcode
+            and q.compact <> ''
+            and (
+                exists (
+                    select 1
+                    from public.design_postcodes p
+                    where p.design_id = d.id
+                      and upper(replace(btrim(p.postcode), ' ', '')) like q.compact || '%'
+                )
+                or exists (
+                    select 1
+                    from public.design_postcode_sectors s
+                    where s.design_id = d.id
+                      and upper(replace(btrim(s.sector), ' ', '')) like q.compact || '%'
+                )
             )
         )
       )
     order by
       case
         when upper(d.design_code) = upper(q.raw) then 0
-        when exists (
+        when q.is_full_postcode and exists (
             select 1
             from public.design_postcodes p
             where p.design_id = d.id
@@ -92,13 +106,19 @@ as $$
         ) then 1
         when lower(d.street_name) = lower(q.raw) then 2
         when lower(d.street_name) like lower(q.raw) || '%' then 3
-        when q.postcode_prefix <> '' and exists (
+        when not q.is_full_postcode and q.compact <> '' and exists (
+            select 1
+            from public.design_postcode_sectors s
+            where s.design_id = d.id
+              and upper(replace(btrim(s.sector), ' ', '')) like q.compact || '%'
+        ) then 4
+        when not q.is_full_postcode and q.compact <> '' and exists (
             select 1
             from public.design_postcodes p
             where p.design_id = d.id
-              and upper(replace(btrim(p.postcode), ' ', '')) like q.postcode_prefix || '%'
-        ) then 4
-        else 5
+              and upper(replace(btrim(p.postcode), ' ', '')) like q.compact || '%'
+        ) then 5
+        else 6
       end,
       lower(d.street_name),
       d.design_code
@@ -110,6 +130,6 @@ revoke all on function public.search_catalogue(text, integer, integer) from publ
 grant execute on function public.search_catalogue(text, integer, integer) to anon, authenticated;
 
 comment on function public.search_catalogue(text, integer, integer) is
-'Browser-safe catalogue search by street name, Design ID, or postcode. Full postcode input falls back to postcode-sector discovery. Returns only public mockup metadata.';
+'Browser-safe catalogue search. Full postcodes use exact mappings only; partial postcode/sector input uses broader discovery mappings. Returns only public mockup metadata.';
 
 commit;
