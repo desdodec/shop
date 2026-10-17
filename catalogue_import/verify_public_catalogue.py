@@ -85,6 +85,13 @@ def check_fields(rows: list[dict], failures: list[str], context: str) -> None:
             return
 
 
+def numeric_street_id(value: object) -> int | None:
+    raw = str(value or "").strip()
+    if not raw.isdigit():
+        return None
+    return int(raw)
+
+
 def postcode_probe(
     url: str,
     key: str,
@@ -129,8 +136,11 @@ def main() -> int:
         check_fields(rows, failures, "HB-0024")
         if row.get("design_code") != "HB-0024":
             failures.append(f"unexpected design_code: {row.get('design_code')!r}")
-        if str(row.get("street_id")) != "24":
-            failures.append(f"unexpected street_id: {row.get('street_id')!r}; expected '24'")
+        street_id = numeric_street_id(row.get("street_id"))
+        if street_id != 24:
+            failures.append(
+                f"unexpected street_id: {row.get('street_id')!r}; expected numeric identity 24"
+            )
         if row.get("street_name") != "Blenheim Street":
             failures.append(f"unexpected street_name: {row.get('street_name')!r}")
         if not str(row.get("front_mockup_key", "")).startswith("front/"):
