@@ -320,9 +320,9 @@ function renderDesign(item, { scroll = false } = {}) {
   currentItems = [item];
   results.replaceChildren();
   results.classList.remove('finder-results');
-  resultsTitle.textContent = 'Your street design';
+  resultsTitle.textContent = 'Large mug preview';
   resultCount.textContent = item.design_code;
-  status.textContent = `${item.street_name} selected for preview.`;
+  status.textContent = `${item.street_name} preview is ready.`;
 
   const fragment = template.content.cloneNode(true);
   const card = fragment.querySelector('.design-card');
@@ -354,6 +354,11 @@ function renderDesign(item, { scroll = false } = {}) {
 }
 
 function renderSuggestions(items, query) {
+  if (items.length === 1) {
+    renderDesign(items[0], { scroll: true });
+    return;
+  }
+
   previewedDesignCode = null;
   currentItems = items;
   results.replaceChildren();
@@ -383,12 +388,15 @@ function renderSuggestions(items, query) {
     details.type = 'button';
     details.innerHTML = `<span>${escapeHtml(item.street_name)}</span><small>${escapeHtml(item.locality || '')}</small>`;
     details.setAttribute('aria-label', `Preview ${item.street_name}`);
-    details.addEventListener('click', () => renderDesign(item));
+    details.addEventListener('click', () => renderDesign(item, { scroll: true }));
 
     const chooseButton = document.createElement('button');
     chooseButton.className = 'street-finder-choice';
     chooseButton.type = 'button';
-    chooseButton.addEventListener('click', () => toggleSelection(item));
+    chooseButton.addEventListener('click', () => {
+      toggleSelection(item);
+      renderDesign(item, { scroll: true });
+    });
 
     option.append(details, chooseButton);
     updateFinderSelection(option, item);
@@ -396,9 +404,7 @@ function renderSuggestions(items, query) {
   }
 
   results.append(list);
-  status.textContent = items.length === 1
-    ? 'Choose the street, or preview the mug design.'
-    : `Choose one or more streets from ${items.length} matches, or tap a street name to preview it.`;
+  status.textContent = `Choose one or more streets from ${items.length} matches, or tap a street name to open its large preview.`;
 }
 
 function escapeHtml(value) {
@@ -631,7 +637,7 @@ async function initialiseStreetMap() {
 
         const wasSelected = isSelected(item.design_code);
         toggleSelection(item);
-        renderDesign(item);
+        renderDesign(item, { scroll: true });
         mapPopup
           .setLngLat(event.lngLat)
           .setText(`${item.street_name} · ${wasSelected ? 'Removed' : 'Selected'}`)
@@ -664,7 +670,7 @@ form.addEventListener('submit', (event) => {
   window.clearTimeout(debounceTimer);
 
   if (currentItems.length === 1) {
-    renderDesign(currentItems[0]);
+    renderDesign(currentItems[0], { scroll: true });
     return;
   }
 
