@@ -1,12 +1,23 @@
 import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.14.0/dist/maplibre-gl.mjs';
 
 const config = window.STREET_FACE_CONFIG;
+const collection = config?.collection;
 
-if (!config?.supabaseUrl || !config?.supabasePublishableKey || !config?.mockupBaseUrl) {
+if (
+  !config?.supabaseUrl
+  || !config?.supabasePublishableKey
+  || !config?.mockupBaseUrl
+  || !collection?.id
+  || !collection?.name
+  || !collection?.designCodePrefix
+  || !collection?.geojsonUrl
+  || !collection?.mapStyle
+) {
   throw new Error('Storefront configuration is missing.');
 }
 
-const STORAGE_KEY = 'street-face-selected-designs-v1';
+const LEGACY_STORAGE_KEY = 'street-face-selected-designs-v1';
+const STORAGE_KEY = `${LEGACY_STORAGE_KEY}:${collection.id}`;
 const SUGGESTION_LIMIT = 12;
 const TYPEAHEAD_DELAY_MS = 120;
 const MAP_PAGE_SIZE = 50;
@@ -35,9 +46,20 @@ let streetMap = null;
 let mapPopup = null;
 const mapItemsByDesignCode = new Map();
 
+function applyCollectionCopy() {
+  const pilot = document.querySelector('.pilot');
+  const heroCopy = document.querySelector('.hero-copy');
+
+  if (pilot) pilot.textContent = `${collection.name} collection`;
+  if (heroCopy) {
+    heroCopy.textContent = `These are the streets currently available in our ${collection.name} test collection. Tap a street on the map, or start typing its name below.`;
+  }
+}
+
 function loadSelections() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY)
+      ?? (collection.id === 'hebden-bridge' ? localStorage.getItem(LEGACY_STORAGE_KEY) : null);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item) => item?.design_code && item?.street_name);
@@ -180,6 +202,11 @@ function refreshFinderSelections() {
   });
 }
 
+function updateMapStatus() {
+  if (!mapStatus || !mapItemsByDesignCode.size) return;
+  mapStatus.textContent = `${mapItemsByDesignCode.size} street designs available${selectedDesigns.length ? ` · ${selectedDesigns.length} selected` : ''}`;
+}
+
 function toggleSelection(item) {
   if (isSelected(item.design_code)) {
     selectedDesigns = selectedDesigns.filter((selected) => selected.design_code !== item.design_code);
@@ -199,6 +226,7 @@ function toggleSelection(item) {
   refreshVisibleCards();
   refreshFinderSelections();
   refreshMapSelections();
+  updateMapStatus();
 }
 
 function updateUrl(query) {
@@ -350,9 +378,12 @@ async function runTypeahead(query) {
   }
 }
 
-function designStreetId(item) {
-  const match = /^HB-(\d{4})$/.exec(item.design_code || '');
-  return match ? Number(match[1]) : null;
+function mapFeatureIndex(item) {
+  const code = String(item.design_code || '');
+  if (!code.startsWith(collection.designCodePrefix)) return null;
+  const suffix = code.slice(collection.designCodePrefix.length);
+  if (!/^\d+$/.test(suffix)) return null;
+  return Number(suffix);
 }
 
 function extendBoundsFromCoordinates(bounds, coordinates) {
@@ -373,7 +404,7 @@ async function initialiseStreetMap() {
 
   try {
     const [geojsonResponse, catalogueItems] = await Promise.all([
-      fetch('/data/hebden_bridge_streets.geojson'),
+      fetch(collection.geojsonUrl),
       loadAllCatalogueItems(),
     ]);
 
@@ -382,18 +413,18 @@ async function initialiseStreetMap() {
     }
 
     const geojson = await geojsonResponse.json();
-    const catalogueByStreetId = new Map();
+    const catalogueByFeatureIndex = new Map();
     mapItemsByDesignCode.clear();
 
     for (const item of catalogueItems) {
-      const streetId = designStreetId(item);
-      if (streetId !== null) catalogueByStreetId.set(streetId, item);
+      const featureIndex = mapFeatureIndex(item);
+      if (featureIndex !== null) catalogueByFeatureIndex.set(featureIndex, item);
       mapItemsByDesignCode.set(item.design_code, item);
     }
 
     const availableFeatures = geojson.features
       .map((feature, index) => {
-        const item = catalogueByStreetId.get(index);
+        const item = catalogueByFeatureIndex.get(index);
         if (!item) return null;
         return {
           ...feature,
@@ -412,9 +443,9 @@ async function initialiseStreetMap() {
 
     streetMap = new maplibregl.Map({
       container: mapElement,
-      style: 'https://tiles.openfreemap.org/styles/positron',
-      center: [-2.0, 53.74],
-      zoom: 11,
+      style: collection.mapStyle,
+      center: collection.initialMapCenter ?? [-2.0, 53.74],
+      zoom: collection.initialMapZoom ?? 11,
       attributionControl: true,
     });
 
@@ -506,14 +537,13 @@ async function initialiseStreetMap() {
 
         const wasSelected = isSelected(item.design_code);
         toggleSelection(item);
-        mapStatus.textContent = `${catalogueItems.length} street designs available · ${selectedDesigns.length} selected`;
         mapPopup
           .setLngLat(event.lngLat)
           .setText(`${item.street_name} · ${wasSelected ? 'Removed' : 'Selected'}`)
           .addTo(streetMap);
       });
 
-      mapStatus.textContent = `${catalogueItems.length} street designs available${selectedDesigns.length ? ` · ${selectedDesigns.length} selected` : ''}`;
+      updateMapStatus();
     });
 
     streetMap.on('error', (event) => {
@@ -559,9 +589,7 @@ clearSelectionButton.addEventListener('click', () => {
   refreshVisibleCards();
   refreshFinderSelections();
   refreshMapSelections();
-  if (mapItemsByDesignCode.size) {
-    mapStatus.textContent = `${mapItemsByDesignCode.size} street designs available`;
-  }
+  updateMapStatus();
 });
 
 copyDesignIdsButton.addEventListener('click', async () => {
@@ -578,6 +606,7 @@ copyDesignIdsButton.addEventListener('click', async () => {
 });
 
 const initialQuery = new URL(window.location.href).searchParams.get('q')?.trim() ?? '';
+applyCollectionCopy();
 input.value = initialQuery;
 renderSelectionTray();
 initialiseStreetMap();
