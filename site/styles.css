@@ -308,6 +308,33 @@ h1 {
   display: block;
 }
 
+.results:not(.finder-results) {
+  display: block;
+}
+
+.results:not(.finder-results) .design-card {
+  width: 100%;
+  padding: clamp(18px, 3vw, 32px);
+}
+
+.results:not(.finder-results) .preview-grid {
+  gap: clamp(12px, 2vw, 24px);
+}
+
+.results:not(.finder-results) figure img {
+  max-height: 720px;
+  object-fit: contain;
+  background: #f7f5f0;
+}
+
+.results:not(.finder-results) .design-info {
+  padding: 24px 4px 16px;
+}
+
+.results:not(.finder-results) .street-name {
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+}
+
 .street-finder-list {
   overflow: hidden;
   border: 1px solid #ddd7cc;
@@ -654,6 +681,14 @@ footer {
 
   .results {
     grid-template-columns: 1fr;
+  }
+
+  .results:not(.finder-results) .preview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .results:not(.finder-results) figure img {
+    max-height: none;
   }
 
   .street-finder-option {
