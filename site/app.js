@@ -169,15 +169,8 @@ function updateCardSelection(card, item) {
 }
 
 function updateFinderSelection(option, item) {
-  const selected = isSelected(item.design_code);
-  const chooseButton = option.querySelector('.street-finder-choice');
-  option.classList.toggle('selected', selected);
-  chooseButton.textContent = selected ? 'Selected' : 'Choose';
-  chooseButton.setAttribute('aria-pressed', String(selected));
-  chooseButton.setAttribute(
-    'aria-label',
-    selected ? `Remove ${item.street_name} from selected designs` : `Choose ${item.street_name}`,
-  );
+  // Search results always preview; selection happens only in the mug panel.
+  option.classList.toggle('selected', isSelected(item.design_code));
 }
 
 function mapSelectionExpression(selectedValue, defaultValue) {
@@ -370,6 +363,7 @@ function renderSuggestions(items, query) {
   }
 
   if (items.length === 1) {
+    finderMatches.hidden = true;
     renderDesign(items[0]);
     status.textContent = `${items[0].street_name} — preview on the right.`;
     return;
