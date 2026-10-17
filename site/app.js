@@ -119,9 +119,6 @@ async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT, offset
       throw new Error(`Catalogue request failed (${scopedResponse.status}): ${detail}`);
     }
 
-    // Deployment bridge only: an older Supabase project may not yet have the
-    // collection-scoped RPC. Keep the live pilot usable until public_catalogue.sql
-    // is applied, then all calls automatically switch to scoped mode.
     catalogueApiMode = 'legacy';
     console.warn('Collection-scoped catalogue RPC is not deployed yet; using temporary legacy compatibility mode.');
   }
@@ -401,9 +398,6 @@ function mapFeatureIndex(item) {
   const streetId = String(item.street_id ?? '').trim();
   if (/^\d+$/.test(streetId)) return Number(streetId);
 
-  // Temporary deployment bridge only. The old public RPC did not return
-  // street_id, so preserve the existing Hebden Bridge map until the scoped RPC
-  // is deployed. Once deployed, street_id is always the authoritative bridge.
   if (catalogueApiMode === 'legacy' && collection.designCodePrefix) {
     const code = String(item.design_code || '');
     if (code.startsWith(collection.designCodePrefix)) {
@@ -567,6 +561,7 @@ async function initialiseStreetMap() {
 
         const wasSelected = isSelected(item.design_code);
         toggleSelection(item);
+        renderDesign(item);
         mapPopup
           .setLngLat(event.lngLat)
           .setText(`${item.street_name} · ${wasSelected ? 'Removed' : 'Selected'}`)
