@@ -258,13 +258,13 @@ function updateUrl(query) {
   history.replaceState(null, '', url);
 }
 
-function renderDesign(item, { scroll = false } = {}) {
+function renderDesign(item, { scroll = false, statusText = null } = {}) {
   currentItems = [item];
   results.replaceChildren();
   results.classList.remove('finder-results');
   resultsTitle.textContent = 'Your street design';
   resultCount.textContent = item.design_code;
-  status.textContent = `${item.street_name} selected for preview.`;
+  status.textContent = statusText ?? `${item.street_name} ready to preview.`;
 
   const fragment = template.content.cloneNode(true);
   const card = fragment.querySelector('.design-card');
@@ -567,6 +567,12 @@ async function initialiseStreetMap() {
 
         const wasSelected = isSelected(item.design_code);
         toggleSelection(item);
+        renderDesign(item, {
+          scroll: true,
+          statusText: wasSelected
+            ? `${item.street_name} removed from your selection. Preview shown below.`
+            : `${item.street_name} selected. Preview shown below.`,
+        });
         mapPopup
           .setLngLat(event.lngLat)
           .setText(`${item.street_name} · ${wasSelected ? 'Removed' : 'Selected'}`)
