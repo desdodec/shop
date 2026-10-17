@@ -790,3 +790,9 @@ footer {
  .preview-placeholder { min-height:260px; }
  .results:not(.finder-results) .design-card { padding:10px; }
 }
+
+/* Keep selected mugs reachable without scrolling on laptop screens. */
+@media (min-width: 851px) {
+  body:has(.selection-tray:not([hidden])) .workspace { padding-bottom:180px; }
+  .selection-tray:not([hidden]) { position:fixed; left:0; right:0; bottom:0; max-height:180px; overflow:auto; }
+}
