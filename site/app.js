@@ -40,6 +40,7 @@ const mapStatus = document.querySelector('#map-status');
 
 let currentItems = [];
 let selectedDesigns = loadSelections();
+let previewedDesignCode = null;
 let debounceTimer = null;
 let requestVersion = 0;
 let streetMap = null;
@@ -75,6 +76,17 @@ function saveSelections() {
 
 function isSelected(designCode) {
   return selectedDesigns.some((item) => item.design_code === designCode);
+}
+
+function selectionSnapshot(item) {
+  return {
+    design_code: item.design_code,
+    street_id: item.street_id,
+    street_name: item.street_name,
+    locality: item.locality,
+    front_mockup_key: item.front_mockup_key,
+    rear_mockup_key: item.rear_mockup_key,
+  };
 }
 
 function assetUrl(key) {
@@ -194,16 +206,72 @@ function renderSelectionTray() {
   selectedDesignsContainer.replaceChildren();
   selectionTray.hidden = selectedDesigns.length === 0;
 
-  for (const item of selectedDesigns) {
+  for (const savedItem of selectedDesigns) {
+    const item = mapItemsByDesignCode.get(savedItem.design_code) ?? savedItem;
     const fragment = selectedDesignTemplate.content.cloneNode(true);
+    const selectedDesign = fragment.querySelector('.selected-design');
+    const reviewButton = fragment.querySelector('.review-selected');
+    const thumbnail = fragment.querySelector('.selected-thumbnail');
+    const reviewLabel = fragment.querySelector('.review-label');
+
     fragment.querySelector('.selected-street').textContent = item.street_name;
     fragment.querySelector('.selected-code').textContent = item.design_code;
+
+    const canPreview = Boolean(item.front_mockup_key && item.rear_mockup_key);
+    reviewButton.disabled = !canPreview;
+    reviewButton.setAttribute('aria-label', `Preview ${item.street_name} mug`);
+
+    if (item.front_mockup_key) {
+      thumbnail.src = assetUrl(item.front_mockup_key);
+      thumbnail.alt = `${item.street_name} mug thumbnail`;
+    } else {
+      thumbnail.removeAttribute('src');
+      thumbnail.alt = '';
+    }
+
+    if (previewedDesignCode === item.design_code) {
+      selectedDesign.classList.add('is-previewing');
+      reviewLabel.textContent = 'Viewing';
+      reviewButton.setAttribute('aria-current', 'true');
+    } else {
+      reviewLabel.textContent = canPreview ? 'Preview' : 'Loading';
+    }
+
+    reviewButton.addEventListener('click', () => {
+      if (!canPreview) return;
+      renderDesign(item, { scroll: true });
+    });
 
     const removeButton = fragment.querySelector('.remove-selected');
     removeButton.setAttribute('aria-label', `Remove ${item.street_name} (${item.design_code})`);
     removeButton.addEventListener('click', () => toggleSelection(item));
     selectedDesignsContainer.append(fragment);
   }
+}
+
+function hydrateSelectionsFromCatalogue(catalogueItems) {
+  if (!selectedDesigns.length) return;
+
+  const catalogueByCode = new Map(catalogueItems.map((item) => [item.design_code, item]));
+  let changed = false;
+
+  selectedDesigns = selectedDesigns.map((savedItem) => {
+    const catalogueItem = catalogueByCode.get(savedItem.design_code);
+    if (!catalogueItem) return savedItem;
+
+    const hydrated = selectionSnapshot(catalogueItem);
+    if (
+      savedItem.front_mockup_key !== hydrated.front_mockup_key
+      || savedItem.rear_mockup_key !== hydrated.rear_mockup_key
+      || savedItem.street_id !== hydrated.street_id
+    ) {
+      changed = true;
+    }
+    return hydrated;
+  });
+
+  if (changed) saveSelections();
+  renderSelectionTray();
 }
 
 function refreshVisibleCards() {
@@ -229,15 +297,7 @@ function toggleSelection(item) {
   if (isSelected(item.design_code)) {
     selectedDesigns = selectedDesigns.filter((selected) => selected.design_code !== item.design_code);
   } else {
-    selectedDesigns = [
-      ...selectedDesigns,
-      {
-        design_code: item.design_code,
-        street_id: item.street_id,
-        street_name: item.street_name,
-        locality: item.locality,
-      },
-    ];
+    selectedDesigns = [...selectedDesigns, selectionSnapshot(item)];
   }
 
   saveSelections();
@@ -256,6 +316,7 @@ function updateUrl(query) {
 }
 
 function renderDesign(item, { scroll = false } = {}) {
+  previewedDesignCode = item.design_code;
   currentItems = [item];
   results.replaceChildren();
   results.classList.remove('finder-results');
@@ -285,6 +346,7 @@ function renderDesign(item, { scroll = false } = {}) {
   input.value = item.street_name;
   clearSearchButton.hidden = false;
   updateUrl(item.street_name);
+  renderSelectionTray();
 
   if (scroll) {
     document.querySelector('.results-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -292,11 +354,13 @@ function renderDesign(item, { scroll = false } = {}) {
 }
 
 function renderSuggestions(items, query) {
+  previewedDesignCode = null;
   currentItems = items;
   results.replaceChildren();
   results.classList.add('finder-results');
   resultsTitle.textContent = 'Matching streets';
   resultCount.textContent = `${items.length} match${items.length === 1 ? '' : 'es'}`;
+  renderSelectionTray();
 
   if (!items.length) {
     const empty = document.createElement('div');
@@ -348,6 +412,7 @@ function escapeHtml(value) {
 
 function resetFinder() {
   requestVersion += 1;
+  previewedDesignCode = null;
   currentItems = [];
   results.replaceChildren();
   results.classList.add('finder-results');
@@ -356,6 +421,7 @@ function resetFinder() {
   status.textContent = 'Start typing to find a street.';
   clearSearchButton.hidden = true;
   updateUrl('');
+  renderSelectionTray();
 }
 
 async function runTypeahead(query) {
@@ -364,6 +430,7 @@ async function runTypeahead(query) {
   updateUrl(trimmed);
 
   if (trimmed.length < 2) {
+    previewedDesignCode = null;
     currentItems = [];
     results.replaceChildren();
     resultsTitle.textContent = 'Matching streets';
@@ -371,6 +438,7 @@ async function runTypeahead(query) {
     status.textContent = trimmed.length === 1
       ? 'Type one more letter to see matching streets.'
       : 'Start typing to find a street.';
+    renderSelectionTray();
     return;
   }
 
@@ -444,6 +512,8 @@ async function initialiseStreetMap() {
       if (featureIndex !== null) catalogueByFeatureIndex.set(featureIndex, item);
       mapItemsByDesignCode.set(item.design_code, item);
     }
+
+    hydrateSelectionsFromCatalogue(catalogueItems);
 
     const availableFeatures = geojson.features
       .map((feature, index) => {
