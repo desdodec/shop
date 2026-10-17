@@ -449,6 +449,18 @@ async function initialiseStreetMap() {
         },
       });
 
+      streetMap.addLayer({
+        id: 'hovered-street',
+        type: 'line',
+        source: 'available-streets-source',
+        filter: ['==', ['get', 'design_code'], ''],
+        paint: {
+          'line-color': '#1976d2',
+          'line-width': 9,
+          'line-opacity': 1,
+        },
+      });
+
       const bounds = new maplibregl.LngLatBounds();
       for (const feature of geojson.features) {
         extendBoundsFromCoordinates(bounds, feature.geometry?.coordinates);
@@ -469,12 +481,15 @@ async function initialiseStreetMap() {
 
       streetMap.on('mouseleave', 'available-streets-hit-area', () => {
         streetMap.getCanvas().style.cursor = '';
+        streetMap.setFilter('hovered-street', ['==', ['get', 'design_code'], '']);
         mapPopup.remove();
       });
 
       streetMap.on('mousemove', 'available-streets-hit-area', (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
+        const designCode = feature.properties?.design_code || '';
+        streetMap.setFilter('hovered-street', ['==', ['get', 'design_code'], designCode]);
         mapPopup
           .setLngLat(event.lngLat)
           .setText(feature.properties?.street_name || 'Available street')
