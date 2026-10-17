@@ -14,60 +14,45 @@
     <span class="pilot">Hebden Bridge collection</span>
   </header>
 
-  <main>
-    <section class="hero" aria-labelledby="hero-title">
-      <p class="eyebrow">A mug built around somewhere that matters</p>
-      <h1 id="hero-title">Find Your Street</h1>
-      <p class="hero-copy">These are the streets currently available in our Hebden Bridge test collection. Tap streets on the map to choose one or more, or start typing a street name below.</p>
-
-      <section class="map-panel" aria-labelledby="map-title">
-        <div class="map-heading">
-          <div>
-            <p class="map-kicker">Available now</p>
-            <h2 id="map-title">Streets in this collection</h2>
+  <main class="workspace">
+    <div class="workspace-heading">
+      <div><p class="eyebrow">A mug built around somewhere that matters</p><h1>Find your street</h1></div>
+      <p class="hero-copy">Explore streets in our Hebden Bridge test collection. Preview any mug, then add your favourites.</p>
+    </div>
+    <div class="workspace-columns">
+      <section class="discovery-panel" aria-label="Find a street">
+        <form id="search-form" class="search" role="search">
+          <label for="search-input">Find a street</label>
+          <div class="search-row">
+            <input id="search-input" name="q" type="search" inputmode="search" autocomplete="off" placeholder="Try Burnley Road" maxlength="100" aria-describedby="search-help">
+            <button type="submit">Find</button>
           </div>
-          <p id="map-status" class="map-status" role="status" aria-live="polite">Loading available streets…</p>
+          <p id="search-help" class="search-help">Start typing a street name, or explore the map.</p>
+        </form>
+        <div class="search-meta">
+          <div id="status" class="status" role="status" aria-live="polite">Start typing or click a street on the map.</div>
+          <button id="clear-search" class="text-button" type="button" hidden>Clear</button>
         </div>
-        <div id="street-map" class="street-map" aria-label="Map showing streets with available Street Face designs"></div>
-        <p class="map-help">Tap or click a highlighted street to add it to your selection. Tap it again to remove it. You can choose several streets.</p>
+        <section class="finder-matches" aria-labelledby="finder-title" hidden>
+          <div class="results-heading"><h2 id="finder-title">Matching streets</h2><span id="finder-count" class="result-count"></span></div>
+          <div id="finder-results" class="finder-results"></div>
+        </section>
+        <section class="map-panel" aria-labelledby="map-title">
+          <div class="map-heading">
+            <div><p class="map-kicker">Available now</p><h2 id="map-title">Explore the streets</h2></div>
+            <p id="map-status" class="map-status" role="status" aria-live="polite">Loading streets…</p>
+          </div>
+          <div id="street-map" class="street-map" aria-label="Map of available Street Face streets"></div>
+          <p class="map-help">Click any highlighted street to preview its mug. Previewing does not add it to your mugs.</p>
+        </section>
       </section>
-
-      <div class="finder-intro">
-        <p class="map-kicker">Know the street name?</p>
-        <h2>Use the rapid street finder</h2>
-      </div>
-
-      <form id="search-form" class="search" role="search">
-        <label for="search-input">Street name</label>
-        <div class="search-row">
-          <input
-            id="search-input"
-            name="q"
-            type="search"
-            inputmode="search"
-            autocomplete="off"
-            placeholder="e.g. Burnley Road"
-            maxlength="100"
-            aria-describedby="search-help"
-          >
-          <button type="submit">Find street</button>
+      <section class="results-wrap" aria-labelledby="results-title">
+        <div class="results-heading"><h2 id="results-title">Your mug preview</h2><span id="result-count" class="result-count"></span></div>
+        <div id="results" class="results">
+          <div class="preview-placeholder"><p class="map-kicker">See it before you choose it</p><h3>Pick a street to see your mug</h3><p>Its front and reverse mockups will appear here.</p></div>
         </div>
-        <p id="search-help" class="search-help">You only need a few letters — try “burn” for Burnley Road.</p>
-      </form>
-
-      <div class="search-meta">
-        <div id="status" class="status" role="status" aria-live="polite">Start typing to find a street.</div>
-        <button id="clear-search" class="text-button" type="button" hidden>Clear</button>
-      </div>
-    </section>
-
-    <section class="results-wrap" aria-labelledby="results-title">
-      <div class="results-heading">
-        <h2 id="results-title">Matching streets</h2>
-        <span id="result-count" class="result-count"></span>
-      </div>
-      <div id="results" class="results"></div>
-    </section>
+      </section>
+    </div>
   </main>
 
   <aside id="selection-tray" class="selection-tray" aria-labelledby="selection-title" hidden>
@@ -76,7 +61,7 @@
         <div>
           <p class="selection-kicker">Your selected designs</p>
           <h2 id="selection-title">Review your mugs</h2>
-          <p class="selection-help">Tap any selected mug to reopen its full preview.</p>
+          <p class="selection-help">Choose a thumbnail to revisit its preview.</p>
         </div>
         <button id="clear-selection" class="text-button" type="button">Clear all</button>
       </div>
@@ -94,14 +79,18 @@
   <template id="design-template">
     <article class="design-card">
       <div class="preview-grid">
-        <figure>
-          <img class="front-image" alt="" loading="lazy" decoding="async">
-          <figcaption>Front</figcaption>
+        <figure class="front-view">
+          <img class="front-image" alt="" decoding="async">
+          <figcaption>Front of mug</figcaption>
         </figure>
-        <figure>
-          <img class="rear-image" alt="" loading="lazy" decoding="async">
-          <figcaption>Reverse</figcaption>
+        <figure class="rear-view" hidden>
+          <img class="rear-image" alt="" decoding="async">
+          <figcaption>Reverse of mug</figcaption>
         </figure>
+      </div>
+      <div class="preview-switch" role="group" aria-label="Mug view">
+        <button class="view-front is-active" type="button" aria-pressed="true">Front</button>
+        <button class="view-rear" type="button" aria-pressed="false">Reverse</button>
       </div>
       <div class="design-info">
         <div>
@@ -110,7 +99,7 @@
         </div>
         <span class="design-code"></span>
       </div>
-      <button class="select-design" type="button">Choose this design</button>
+      <button class="select-design" type="button">Add to my mugs</button>
       <p class="selection-note" hidden></p>
     </article>
   </template>
