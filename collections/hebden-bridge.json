@@ -1,0 +1,11 @@
+{
+  "id": "hebden-bridge",
+  "name": "Hebden Bridge",
+  "datasetId": "20261009_112459_hebden_bridge_streets_parks_water_boundary_clip",
+  "designCodePrefix": "HB-",
+  "geojsonSource": "geojson/hebden_bridge_streets.geojson",
+  "publicGeojsonUrl": "/data/hebden_bridge_streets.geojson",
+  "mapStyle": "https://tiles.openfreemap.org/styles/positron",
+  "initialMapCenter": [-2.0, 53.74],
+  "initialMapZoom": 11
+}
