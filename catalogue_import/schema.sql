@@ -40,7 +40,7 @@ create table if not exists design_assets (
 create table if not exists design_postcodes (
     design_id uuid not null references designs(id) on delete cascade,
     postcode text not null,
-    postcode_normalized text generated always as (upper(regexp_replace(postcode, '\\s+', '', 'g'))) stored,
+    postcode_normalized text generated always as (upper(replace(btrim(postcode), ' ', ''))) stored,
     created_at timestamptz not null default now(),
     primary key (design_id, postcode),
     check (length(btrim(postcode)) >= 2)
