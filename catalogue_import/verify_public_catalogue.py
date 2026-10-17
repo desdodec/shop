@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Verify the browser-safe Supabase catalogue RPC using the publishable key.
+"""Verify the browser-safe, collection-scoped Supabase catalogue RPC.
 
 Reads SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY from catalogue_import/.env.
-No keys are printed. Exits non-zero if the public API leaks unexpected fields,
-fails to return the known HB-0024 design, or fails a postcode-search check when
-local postcode review output is available.
+No keys are printed. The verifier confirms that the active collection is scoped
+by dataset_id, returns street_id for deterministic GeoJSON mapping, does not leak
+internal fields, and still supports street / Design ID / postcode search.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 EXPECTED_FIELDS = {
     "design_code",
+    "street_id",
     "street_name",
     "locality",
     "front_mockup_key",
@@ -28,6 +29,7 @@ EXPECTED_FIELDS = {
 }
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+COLLECTION_MANIFEST = REPO_ROOT / "collections" / "hebden-bridge.json"
 POSTCODE_REVIEW_CSV = REPO_ROOT / "reports" / "postcode_recommended.csv"
 
 
@@ -38,11 +40,16 @@ def required(name: str) -> str:
     return value.rstrip("/") if name == "SUPABASE_URL" else value
 
 
-def rpc(url: str, key: str, search_text: str) -> list[dict]:
+def collection_config() -> dict:
+    return json.loads(COLLECTION_MANIFEST.read_text(encoding="utf-8"))
+
+
+def rpc(url: str, key: str, dataset_id: str, search_text: str, limit: int = 24) -> list[dict]:
     payload = json.dumps(
         {
+            "collection_dataset_id": dataset_id,
             "search_text": search_text,
-            "result_limit": 24,
+            "result_limit": limit,
             "result_offset": 0,
         }
     ).encode("utf-8")
@@ -78,14 +85,13 @@ def check_fields(rows: list[dict], failures: list[str], context: str) -> None:
             return
 
 
-def postcode_probe(url: str, key: str) -> tuple[str | None, str | None, list[dict]]:
-    """Find one locally recommended postcode whose expected design is public.
-
-    postcode_recommended.csv preserves GeoJSON feature order. The verified project
-    invariant is zero-based GeoJSON feature index == catalogue street_id, and public
-    design codes use HB-XXXX. We try several eligible rows so this remains robust if
-    an early GeoJSON street has no corresponding catalogue design.
-    """
+def postcode_probe(
+    url: str,
+    key: str,
+    dataset_id: str,
+    design_prefix: str,
+) -> tuple[str | None, str | None, list[dict]]:
+    """Find one locally recommended postcode whose expected design is public."""
     if not POSTCODE_REVIEW_CSV.exists():
         return None, None, []
 
@@ -97,8 +103,8 @@ def postcode_probe(url: str, key: str) -> tuple[str | None, str | None, list[dic
             if not raw:
                 continue
             postcode = raw.split(";")[0].strip()
-            expected_code = f"HB-{feature_index:04d}"
-            rows = rpc(url, key, postcode)
+            expected_code = f"{design_prefix}{feature_index:04d}"
+            rows = rpc(url, key, dataset_id, postcode)
             if any(result.get("design_code") == expected_code for result in rows):
                 return postcode, expected_code, rows
 
@@ -109,10 +115,13 @@ def main() -> int:
     load_dotenv()
     url = required("SUPABASE_URL")
     key = required("SUPABASE_PUBLISHABLE_KEY")
+    collection = collection_config()
+    dataset_id = collection["datasetId"]
+    design_prefix = collection["designCodePrefix"]
 
-    rows = rpc(url, key, "HB-0024")
     failures: list[str] = []
 
+    rows = rpc(url, key, dataset_id, "HB-0024")
     if len(rows) != 1:
         failures.append(f"HB-0024 returned {len(rows)} rows; expected exactly 1")
     else:
@@ -120,6 +129,8 @@ def main() -> int:
         check_fields(rows, failures, "HB-0024")
         if row.get("design_code") != "HB-0024":
             failures.append(f"unexpected design_code: {row.get('design_code')!r}")
+        if str(row.get("street_id")) != "24":
+            failures.append(f"unexpected street_id: {row.get('street_id')!r}; expected '24'")
         if row.get("street_name") != "Blenheim Street":
             failures.append(f"unexpected street_name: {row.get('street_name')!r}")
         if not str(row.get("front_mockup_key", "")).startswith("front/"):
@@ -127,19 +138,30 @@ def main() -> int:
         if not str(row.get("rear_mockup_key", "")).startswith("rear/"):
             failures.append("rear_mockup_key does not start with rear/")
 
-    street_rows = rpc(url, key, "Blenheim")
+    street_rows = rpc(url, key, dataset_id, "Blenheim")
     check_fields(street_rows, failures, "street search")
     if not any(row.get("design_code") == "HB-0024" for row in street_rows):
         failures.append("street-name search for 'Blenheim' did not include HB-0024")
 
-    browse_rows = rpc(url, key, "")
+    browse_rows = rpc(url, key, dataset_id, "")
     check_fields(browse_rows, failures, "browse")
     if not browse_rows:
         failures.append("empty search returned no catalogue rows")
     if len(browse_rows) > 24:
         failures.append(f"empty search returned {len(browse_rows)} rows; expected <= 24")
 
-    postcode, expected_code, postcode_rows = postcode_probe(url, key)
+    wrong_dataset_rows = rpc(url, key, "__street_face_verifier_nonexistent_dataset__", "")
+    if wrong_dataset_rows:
+        failures.append(
+            f"nonexistent dataset returned {len(wrong_dataset_rows)} row(s); dataset scoping failed"
+        )
+
+    postcode, expected_code, postcode_rows = postcode_probe(
+        url,
+        key,
+        dataset_id,
+        design_prefix,
+    )
     if postcode is None:
         postcode_status = "not checked (reports/postcode_recommended.csv not found)"
     elif not postcode:
@@ -154,14 +176,20 @@ def main() -> int:
 
     print("Public catalogue verification")
     print("-----------------------------")
-    print(f"HB-0024 rows:    {len(rows)}")
-    print(f"Blenheim rows:   {len(street_rows)}")
-    print(f"Browse rows:     {len(browse_rows)}")
-    print(f"Postcode search: {postcode_status}")
+    print(f"Collection:        {collection['name']}")
+    print(f"Dataset scoped:    {dataset_id}")
+    print(f"HB-0024 rows:      {len(rows)}")
+    print(f"Blenheim rows:     {len(street_rows)}")
+    print(f"Browse rows:       {len(browse_rows)}")
+    print(f"Wrong dataset:     {len(wrong_dataset_rows)} row(s)")
+    print(f"Postcode search:   {postcode_status}")
 
     if rows:
-        print(f"Known design:    {rows[0].get('design_code')} — {rows[0].get('street_name')}")
-        print(f"Returned fields: {', '.join(sorted(rows[0].keys()))}")
+        print(
+            f"Known design:      {rows[0].get('design_code')} / street_id "
+            f"{rows[0].get('street_id')} — {rows[0].get('street_name')}"
+        )
+        print(f"Returned fields:   {', '.join(sorted(rows[0].keys()))}")
 
     if failures:
         print(f"\nFAILED: {len(failures)} check(s) failed", file=sys.stderr)
@@ -169,7 +197,7 @@ def main() -> int:
             print(f"- {failure}", file=sys.stderr)
         return 1
 
-    print("\nPASS: public RPC supports browser-safe street, Design ID, and postcode search")
+    print("\nPASS: public RPC is browser-safe, collection-scoped, and street_id-addressable")
     return 0
 
 
