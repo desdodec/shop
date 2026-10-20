@@ -40,6 +40,11 @@ const clearSelectionButton = document.querySelector('#clear-selection');
 const copyDesignIdsButton = document.querySelector('#copy-design-ids');
 const mapElement = document.querySelector('#street-map');
 const mapStatus = document.querySelector('#map-status');
+const openCollectionButton = document.querySelector('#open-collection');
+const closeCollectionButton = document.querySelector('#close-collection');
+const collectionCount = document.querySelector('#collection-count');
+const collectionEmpty = document.querySelector('#collection-empty');
+const drawerBackdrop = document.querySelector('#drawer-backdrop');
 
 let currentItems = [];
 let selectedDesigns = loadSelections();
@@ -200,7 +205,8 @@ function refreshMapSelections() {
 
 function renderSelectionTray() {
   selectedDesignsContainer.replaceChildren();
-  selectionTray.hidden = selectedDesigns.length === 0;
+  collectionCount.textContent = String(selectedDesigns.length);
+  collectionEmpty.hidden = selectedDesigns.length > 0;
 
   for (const savedItem of selectedDesigns) {
     const item = mapItemsByDesignCode.get(savedItem.design_code) ?? savedItem;
@@ -235,6 +241,7 @@ function renderSelectionTray() {
 
     reviewButton.addEventListener('click', () => {
       if (!canPreview) return;
+      closeCollection();
       renderDesign(item);
     });
 
@@ -328,6 +335,8 @@ function renderDesign(item) {
   const front = fragment.querySelector('.front-image');
   const rear = fragment.querySelector('.rear-image');
   front.src = assetUrl(item.front_mockup_key);
+  fragment.querySelector('.switch-front-thumb').src = front.src;
+  fragment.querySelector('.switch-rear-thumb').src = assetUrl(item.rear_mockup_key);
   front.alt = `${item.street_name} front mug mockup`;
   rear.src = assetUrl(item.rear_mockup_key);
   rear.alt = `${item.street_name} reverse mug mockup`;
@@ -676,6 +685,37 @@ copyDesignIdsButton.addEventListener('click', async () => {
     }, 1800);
   } catch {
     window.prompt('Copy these Design IDs:', codes);
+  }
+});
+
+function openCollection() {
+  selectionTray.hidden = false;
+  drawerBackdrop.hidden = false;
+  openCollectionButton.setAttribute('aria-expanded', 'true');
+  document.body.classList.add('drawer-open');
+  closeCollectionButton.focus();
+}
+
+function closeCollection() {
+  selectionTray.hidden = true;
+  drawerBackdrop.hidden = true;
+  openCollectionButton.setAttribute('aria-expanded', 'false');
+  document.body.classList.remove('drawer-open');
+  openCollectionButton.focus();
+}
+
+openCollectionButton.addEventListener('click', openCollection);
+closeCollectionButton.addEventListener('click', closeCollection);
+drawerBackdrop.addEventListener('click', closeCollection);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !selectionTray.hidden) closeCollection();
+  if (event.key !== 'Tab' || selectionTray.hidden) return;
+  const controls = [...selectionTray.querySelectorAll('button:not(:disabled)')];
+  if (!controls.length) return;
+  if (event.shiftKey && document.activeElement === controls[0]) {
+    event.preventDefault(); controls[controls.length - 1].focus();
+  } else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) {
+    event.preventDefault(); controls[0].focus();
   }
 });
 
