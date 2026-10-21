@@ -40,6 +40,54 @@ const clearSelectionButton = document.querySelector('#clear-selection');
 const copyDesignIdsButton = document.querySelector('#copy-design-ids');
 const mapElement = document.querySelector('#street-map');
 const mapStatus = document.querySelector('#map-status');
+const lightbox = document.querySelector('#image-lightbox');
+const lightboxImage = document.querySelector('#lightbox-image');
+const lightboxTitle = document.querySelector('#lightbox-title');
+const lightboxFront = document.querySelector('#lightbox-front');
+const lightboxRear = document.querySelector('#lightbox-rear');
+const closeLightboxButton = document.querySelector('#close-lightbox');
+let lightboxItem = null;
+let lightboxView = 'front';
+let lightboxReturnFocus = null;
+
+function setLightboxView(view) {
+  lightboxView = view;
+  lightboxImage.src = assetUrl(view === 'front' ? lightboxItem.front_mockup_key : lightboxItem.rear_mockup_key);
+  lightboxImage.alt = `${lightboxItem.street_name} mug ${view} enlarged preview`;
+  lightboxFront.setAttribute('aria-pressed', String(view === 'front'));
+  lightboxRear.setAttribute('aria-pressed', String(view === 'rear'));
+}
+function openLightbox(item, view, trigger) {
+  lightboxItem = item;
+  lightboxReturnFocus = trigger;
+  lightboxTitle.textContent = item.street_name;
+  setLightboxView(view);
+  lightbox.hidden = false;
+  document.body.classList.add('lightbox-open');
+  closeLightboxButton.focus();
+}
+function closeLightbox() {
+  lightbox.hidden = true;
+  document.body.classList.remove('lightbox-open');
+  lightboxReturnFocus?.focus();
+  lightboxItem = null;
+}
+lightboxFront.addEventListener('click', () => setLightboxView('front'));
+lightboxRear.addEventListener('click', () => setLightboxView('rear'));
+closeLightboxButton.addEventListener('click', closeLightbox);
+lightbox.addEventListener('click', (event) => { if (event.target === lightbox) closeLightbox(); });
+document.addEventListener('keydown', (event) => {
+  if (lightbox.hidden) return;
+  if (event.key === 'Escape') { event.stopPropagation(); closeLightbox(); }
+  if (event.key !== 'Tab') return;
+  const controls = [closeLightboxButton, lightboxFront, lightboxRear];
+  if (event.shiftKey && document.activeElement === controls[0]) {
+    event.preventDefault(); controls[controls.length - 1].focus();
+  } else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) {
+    event.preventDefault(); controls[0].focus();
+  }
+});
+
 const openCollectionButton = document.querySelector('#open-collection');
 const closeCollectionButton = document.querySelector('#close-collection');
 const collectionCount = document.querySelector('#collection-count');
@@ -353,6 +401,11 @@ function renderDesign(item) {
   card.querySelector('.view-front').addEventListener('click', () => showView('front'));
   card.querySelector('.view-rear').addEventListener('click', () => showView('rear'));
   showView('front');
+  const enlargeButton = card.querySelector('.enlarge-preview');
+  enlargeButton.addEventListener('click', () => {
+    const view = card.querySelector('.rear-view').hidden ? 'front' : 'rear';
+    openLightbox(item, view, enlargeButton);
+  });
 
   updateCardSelection(card, item);
   card.querySelector('.select-design').addEventListener('click', () => toggleSelection(item));
