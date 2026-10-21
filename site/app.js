@@ -41,21 +41,40 @@ const copyDesignIdsButton = document.querySelector('#copy-design-ids');
 const mapElement = document.querySelector('#street-map');
 const mapStatus = document.querySelector('#map-status');
 const lightbox = document.querySelector('#image-lightbox');
+const lightboxStage = document.querySelector('#lightbox-stage');
 const lightboxImage = document.querySelector('#lightbox-image');
 const lightboxTitle = document.querySelector('#lightbox-title');
 const lightboxFront = document.querySelector('#lightbox-front');
 const lightboxRear = document.querySelector('#lightbox-rear');
+const lightboxZoomIn = document.querySelector('#lightbox-zoom-in');
+const lightboxZoomOut = document.querySelector('#lightbox-zoom-out');
+const lightboxZoomReset = document.querySelector('#lightbox-zoom-reset');
 const closeLightboxButton = document.querySelector('#close-lightbox');
 let lightboxItem = null;
-let lightboxView = 'front';
 let lightboxReturnFocus = null;
+let imageZoom = 1;
+let imageOffsetX = 0;
+let imageOffsetY = 0;
+let dragStart = null;
 
+function updateImageZoom() {
+  lightboxImage.style.transform = `translate(${imageOffsetX}px, ${imageOffsetY}px) scale(${imageZoom})`;
+  lightboxStage.classList.toggle('is-zoomed', imageZoom > 1);
+  lightboxZoomOut.disabled = imageZoom <= 1;
+  lightboxZoomReset.disabled = imageZoom === 1;
+  lightboxZoomIn.disabled = imageZoom >= 4;
+}
+function zoomImage(nextZoom) {
+  imageZoom = Math.min(4, Math.max(1, nextZoom));
+  if (imageZoom === 1) { imageOffsetX = 0; imageOffsetY = 0; }
+  updateImageZoom();
+}
 function setLightboxView(view) {
-  lightboxView = view;
   lightboxImage.src = assetUrl(view === 'front' ? lightboxItem.front_mockup_key : lightboxItem.rear_mockup_key);
   lightboxImage.alt = `${lightboxItem.street_name} mug ${view} enlarged preview`;
   lightboxFront.setAttribute('aria-pressed', String(view === 'front'));
   lightboxRear.setAttribute('aria-pressed', String(view === 'rear'));
+  imageOffsetX = 0; imageOffsetY = 0; zoomImage(1);
 }
 function openLightbox(item, view, trigger) {
   lightboxItem = item;
@@ -69,18 +88,43 @@ function openLightbox(item, view, trigger) {
 function closeLightbox() {
   lightbox.hidden = true;
   document.body.classList.remove('lightbox-open');
+  dragStart = null;
   lightboxReturnFocus?.focus();
   lightboxItem = null;
 }
 lightboxFront.addEventListener('click', () => setLightboxView('front'));
 lightboxRear.addEventListener('click', () => setLightboxView('rear'));
+lightboxZoomIn.addEventListener('click', () => zoomImage(imageZoom + .5));
+lightboxZoomOut.addEventListener('click', () => zoomImage(imageZoom - .5));
+lightboxZoomReset.addEventListener('click', () => zoomImage(1));
 closeLightboxButton.addEventListener('click', closeLightbox);
 lightbox.addEventListener('click', (event) => { if (event.target === lightbox) closeLightbox(); });
+lightboxStage.addEventListener('dblclick', () => zoomImage(imageZoom > 1 ? 1 : 2));
+lightboxStage.addEventListener('wheel', (event) => {
+  if (lightbox.hidden) return;
+  event.preventDefault();
+  zoomImage(imageZoom + (event.deltaY < 0 ? .25 : -.25));
+}, { passive: false });
+lightboxStage.addEventListener('pointerdown', (event) => {
+  if (imageZoom <= 1) return;
+  dragStart = { x: event.clientX - imageOffsetX, y: event.clientY - imageOffsetY, pointerId: event.pointerId };
+  lightboxStage.setPointerCapture(event.pointerId);
+});
+lightboxStage.addEventListener('pointermove', (event) => {
+  if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+  imageOffsetX = event.clientX - dragStart.x;
+  imageOffsetY = event.clientY - dragStart.y;
+  updateImageZoom();
+});
+lightboxStage.addEventListener('pointerup', () => { dragStart = null; });
+lightboxStage.addEventListener('pointercancel', () => { dragStart = null; });
 document.addEventListener('keydown', (event) => {
   if (lightbox.hidden) return;
-  if (event.key === 'Escape') { event.stopPropagation(); closeLightbox(); }
+  if (event.key === 'Escape') { event.stopPropagation(); closeLightbox(); return; }
+  if (event.key === '+' || event.key === '=') zoomImage(imageZoom + .5);
+  if (event.key === '-') zoomImage(imageZoom - .5);
   if (event.key !== 'Tab') return;
-  const controls = [closeLightboxButton, lightboxFront, lightboxRear];
+  const controls = [closeLightboxButton, lightboxFront, lightboxRear, lightboxZoomOut, lightboxZoomReset, lightboxZoomIn].filter((button) => !button.disabled);
   if (event.shiftKey && document.activeElement === controls[0]) {
     event.preventDefault(); controls[controls.length - 1].focus();
   } else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) {
