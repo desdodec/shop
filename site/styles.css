@@ -45,3 +45,17 @@
   .workspace-heading h1 { font-size:1.8rem; }
   .preview-grid figure img { height:clamp(220px,45vh,350px); }
 }
+
+/* Expandable mockup without adding page height. */
+.enlarge-preview{align-self:flex-end;background:transparent;border:0;color:#8e4b34;font-weight:750;padding:5px 0;font-size:.8rem}
+.enlarge-preview:hover{text-decoration:underline}
+body.lightbox-open{overflow:hidden}
+.image-lightbox[hidden]{display:none}
+.image-lightbox{position:fixed;inset:0;z-index:60;background:rgba(250,249,246,.98);display:flex;flex-direction:column;align-items:center;padding:clamp(12px,2.5vh,24px) clamp(12px,3vw,32px);gap:12px}
+.lightbox-header{width:min(1100px,100%);display:flex;align-items:center;justify-content:space-between;gap:15px;flex:0 0 auto}
+.lightbox-header h2{font-size:clamp(1.15rem,2.3vw,1.8rem);letter-spacing:-.04em}
+#close-lightbox{background:#262b28;color:white;border:0;border-radius:9px;padding:10px 16px;font-weight:700}
+#lightbox-image{display:block;flex:1 1 auto;min-height:0;max-height:calc(100dvh - 170px);width:min(1100px,100%);object-fit:contain;border-radius:12px;background:#f1eee8}
+.lightbox-controls{display:flex;gap:9px;flex:0 0 auto}
+.lightbox-controls button{background:#fff;border:1px solid #d7d0c5;color:#262b28;border-radius:9px;padding:10px 28px;font-weight:700}
+.lightbox-controls button[aria-pressed="true"]{background:#262b28;border-color:#262b28;color:white}
