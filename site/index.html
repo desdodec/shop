@@ -90,6 +90,7 @@
           <figcaption>Reverse of mug</figcaption>
         </figure>
       </div>
+      <button class="enlarge-preview" type="button" aria-label="Enlarge mug image">⤢ Enlarge image</button>
       <div class="preview-switch" role="group" aria-label="Mug view">
         <button class="view-front is-active" type="button" aria-pressed="true"><img class="switch-front-thumb" alt="" loading="lazy">Front</button>
         <button class="view-rear" type="button" aria-pressed="false"><img class="switch-rear-thumb" alt="" loading="lazy">Reverse</button>
@@ -105,6 +106,18 @@
       <p class="selection-note" hidden></p>
     </article>
   </template>
+
+  <div id="image-lightbox" class="image-lightbox" role="dialog" aria-modal="true" aria-labelledby="lightbox-title" hidden>
+    <div class="lightbox-header">
+      <h2 id="lightbox-title">Mug preview</h2>
+      <button id="close-lightbox" type="button" aria-label="Close enlarged preview">Close ×</button>
+    </div>
+    <img id="lightbox-image" alt="">
+    <div class="lightbox-controls" role="group" aria-label="Enlarged mug view">
+      <button id="lightbox-front" type="button" aria-pressed="true">Front</button>
+      <button id="lightbox-rear" type="button" aria-pressed="false">Reverse</button>
+    </div>
+  </div>
 
   <template id="selected-design-template">
     <div class="selected-design">
