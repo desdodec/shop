@@ -2,6 +2,7 @@
 // Deploy with JWT verification disabled; rate-limit at the edge before public launch.
 // Required secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY,
 // SITE_URL, STREET_FACE_DATASET_ID, STREET_FACE_COLLECTION_ID.
+// Required for public checkout: TURNSTILE_SECRET_KEY and a client-provided Turnstile token.
 // Optional: ALLOWED_ORIGIN. Never expose the service role or Stripe secret to a browser.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -26,7 +27,32 @@ Deno.serve(async (req) => {
     const body = await req.text();
     if (body.length > 8192) return json({error:"Basket request too large"},413,origin);
     const payload = JSON.parse(body);
-    if (!payload || typeof payload !== "object") return json({error:"Invalid basket"},400,origin);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return json({error:"Invalid basket"},400,origin);
+
+    // Origin/CORS are not authentication: non-browser clients can forge Origin.
+    // Verify a short-lived, single-use Turnstile challenge server-side before
+    // touching the database or creating any Stripe Checkout Session.
+    const turnstileSecret = Deno.env.get("TURNSTILE_SECRET_KEY") ?? "";
+    const turnstileToken = payload.turnstile_token;
+    if (!turnstileSecret || typeof turnstileToken !== "string" ||
+        turnstileToken.length < 1 || turnstileToken.length > 2048)
+      return json({error:"Checkout verification unavailable"},503,origin);
+    const verification = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method:"POST",
+      headers:{"content-type":"application/x-www-form-urlencoded"},
+      body:new URLSearchParams({
+        secret:turnstileSecret,
+        response:turnstileToken,
+        remoteip:req.headers.get("cf-connecting-ip") ?? ""
+      })
+    });
+    if (!verification.ok) return json({error:"Checkout verification unavailable"},503,origin);
+    const turnstileResult = await verification.json();
+    if (turnstileResult.success !== true)
+      return json({error:"Checkout verification failed; please try again"},403,origin);
+    const expectedHostname = new URL(Deno.env.get("SITE_URL")!).hostname;
+    if (turnstileResult.hostname !== expectedHostname)
+      return json({error:"Checkout verification failed"},403,origin);
     if (!Array.isArray(payload.items) || !payload.items.length || payload.items.length > 4) return json({error:"Select 1–4 designs"},400,origin);
     const quantities = new Map<string,number>();
     for (const row of payload.items) {
