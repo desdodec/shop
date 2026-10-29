@@ -22,7 +22,11 @@ Deno.serve(async (req) => {
   try {
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
     if (!stripeKey.startsWith("sk_test_")) throw new Error("Sandbox key required");
-    const payload = await req.json();
+    // Reject unexpectedly large unauthenticated requests before parsing JSON.
+    const body = await req.text();
+    if (body.length > 8192) return json({error:"Basket request too large"},413,origin);
+    const payload = JSON.parse(body);
+    if (!payload || typeof payload !== "object") return json({error:"Invalid basket"},400,origin);
     if (!Array.isArray(payload.items) || !payload.items.length || payload.items.length > 4) return json({error:"Select 1–4 designs"},400,origin);
     const quantities = new Map<string,number>();
     for (const row of payload.items) {
@@ -75,7 +79,25 @@ Deno.serve(async (req) => {
       throw new Error("Stripe session creation failed");
     }
     const {error:syncError} = await db.from("checkout_orders").update({checkout_status:"checkout_created",stripe_checkout_session_id:stripe.id}).eq("id",order.id);
-    if (syncError) throw new Error("Unable to save Stripe session; order requires reconciliation");
+    if (syncError) {
+      // Do not hand the customer a payment URL that cannot be matched to a saved order.
+      // Expire the newly created unpaid session; if expiry fails, the Stripe session
+      // remains discoverable by its order ID for manual reconciliation.
+      try {
+        const expire = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(stripe.id)}/expire`, {
+          method:"POST",
+          headers:{Authorization:`Bearer ${stripeKey}`,"Idempotency-Key":`expire-${order.id}`}
+        });
+        if (!expire.ok) console.error("Could not expire unsaved Stripe session",order.id);
+      } catch {
+        console.error("Failed to request Stripe session expiry",order.id);
+      }
+      await db.from("checkout_orders").update({
+        checkout_status:"hold",
+        hold_reason:"Stripe session created but not saved; reconcile manually"
+      }).eq("id",order.id).is("stripe_checkout_session_id",null);
+      throw new Error("Unable to save Stripe session; order requires reconciliation");
+    }
     return json({url:stripe.url,order_id:order.id},200,origin);
   } catch (error) {
     console.error("Checkout failure",error);
