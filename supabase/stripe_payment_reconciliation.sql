@@ -19,6 +19,7 @@ as $$
 declare
   o public.checkout_orders%rowtype;
   v_lines integer;
+  v_valid_lines integer;
   v_qty integer;
   v_total integer;
   v_bad integer;
@@ -51,22 +52,30 @@ begin
     return 'duplicate';
   end if;
 
-  select count(*),coalesce(sum(l.quantity),0),coalesce(sum(l.line_total_pence),0),
-         count(*) filter (where d.status <> 'active'
-                           or d.dataset_id <> o.dataset_id
-                           or d.design_code <> l.design_code
-                           or a.design_id <> l.design_id
-                           or a.product_sku <> l.product_sku
-                           or a.version <> l.asset_version
-                           or a.validation_status <> 'valid')
-    into v_lines,v_qty,v_total,v_bad
+  -- LEFT joins prevent missing catalogue records from disappearing from validation.
+  select count(*),
+         count(*) filter (where d.id is not null and a.id is not null),
+         coalesce(sum(l.quantity),0),coalesce(sum(l.line_total_pence),0),
+         count(*) filter (where d.id is null or a.id is null
+                           or d.status is distinct from 'active'
+                           or d.dataset_id is distinct from o.dataset_id
+                           or d.design_code is distinct from l.design_code
+                           or a.design_id is distinct from l.design_id
+                           or a.product_sku is distinct from l.product_sku
+                           or a.version is distinct from l.asset_version
+                           or a.validation_status is distinct from 'valid'
+                           or l.unit_price_pence <> 2000)
+    into v_lines,v_valid_lines,v_qty,v_total,v_bad
     from public.checkout_order_lines l
-    join public.designs d on d.id = l.design_id
-    join public.design_assets a on a.id = l.asset_id
+    left join public.designs d on d.id = l.design_id
+    left join public.design_assets a on a.id = l.asset_id
    where l.checkout_order_id = p_order_id;
 
   if p_payment_status = 'paid' then
-    if v_lines < 1 or v_qty > 4 or v_total <> o.grand_total_pence or v_bad <> 0 or v_qty < 1 then
+    if v_lines < 1 or v_lines <> v_valid_lines or v_qty > 4
+       or v_total <> o.item_subtotal_pence
+       or o.grand_total_pence <> o.item_subtotal_pence + o.shipping_charge_pence
+       or v_bad <> 0 or v_qty < 1 then
       v_status := 'hold';
     else
       v_status := 'validated';
