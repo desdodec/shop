@@ -7,3 +7,6 @@ out/
 .DS_Store
 *.log
 site/config.js
+
+# Supabase CLI temporary files
+supabase/.temp/
