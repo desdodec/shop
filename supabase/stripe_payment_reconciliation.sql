@@ -36,6 +36,12 @@ begin
   select * into o from public.checkout_orders where id = p_order_id for update;
   if not found then raise exception 'Unknown checkout order'; end if;
 
+  -- A webhook can arrive before create-checkout persists the session ID.
+  -- Raise an error so Stripe retries; do not record the event as processed.
+  if o.stripe_checkout_session_id is null then
+    raise exception 'Stripe session not yet persisted, retry webhook';
+  end if;
+
   -- Stripe session identity must be persisted before its webhook is reconciled.
   if o.stripe_checkout_session_id is distinct from p_session_id
      or o.currency is distinct from lower(p_currency)
