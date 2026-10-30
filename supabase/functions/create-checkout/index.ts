@@ -105,6 +105,15 @@ Deno.serve(async (req) => {
     const response = await fetch("https://api.stripe.com/v1/checkout/sessions",{method:"POST",headers:{Authorization:`Bearer ${stripeKey}`,"Content-Type":"application/x-www-form-urlencoded","Idempotency-Key":order.id},body:params});
     const stripe = await response.json();
     if (!response.ok || !stripe.id || !stripe.url) {
+      // Log only Stripe's structured error identifiers. Never log API keys,
+      // request headers, checkout details, or raw Stripe response bodies.
+      console.error("Stripe checkout API rejected session", {
+        http_status: response.status,
+        error_type: typeof stripe?.error?.type === "string" ? stripe.error.type : "unknown",
+        error_code: typeof stripe?.error?.code === "string" ? stripe.error.code : "unknown",
+        error_param: typeof stripe?.error?.param === "string" ? stripe.error.param : null,
+        stripe_request_id: response.headers.get("request-id"),
+      });
       await db.from("checkout_orders").update({checkout_status:"hold",hold_reason:"Stripe session creation failed"}).eq("id",order.id);
       throw new Error("Stripe session creation failed");
     }
