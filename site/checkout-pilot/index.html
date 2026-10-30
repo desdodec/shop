@@ -4,32 +4,36 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>Street Face — Stripe sandbox test only</title>
+<title>Street Face — Multi-design Stripe sandbox pilot</title>
 <style>
-body{font:16px/1.55 system-ui,sans-serif;max-width:620px;margin:4rem auto;padding:0 1.2rem;color:#202020}
-h1{line-height:1.15}label{display:block;margin-top:20px;font-weight:600}
-input,button{font:inherit;padding:.7rem;border-radius:5px}input{width:100%;box-sizing:border-box;border:1px solid #999}
-button{background:#181818;color:#fff;border:0;cursor:pointer;margin-top:20px}
-button:disabled{opacity:.55;cursor:not-allowed}.notice{background:#f4f4f4;padding:12px;border-radius:5px}
-#verification{margin-top:24px}#message{min-height:2rem}
+body{font:16px/1.55 system-ui,sans-serif;max-width:700px;margin:3rem auto;padding:0 1.2rem;color:#202020}
+h1{line-height:1.12}label{display:block;margin-top:12px;font-weight:600}
+input,button{font:inherit;padding:.65rem;border-radius:5px}input{width:100%;box-sizing:border-box;border:1px solid #999}
+button{background:#181818;color:#fff;border:0;cursor:pointer;margin-top:12px}
+button:disabled{opacity:.55;cursor:not-allowed}
+button.secondary{background:#eee;color:#202020;border:1px solid #bbb}
+.notice{background:#f4f4f4;padding:14px;border-radius:5px}
+.item{display:grid;grid-template-columns:minmax(0,2fr) minmax(95px,1fr) auto;gap:12px;align-items:end;padding:12px 0;border-bottom:1px solid #ddd}
+.item button{margin-bottom:0}#verification{margin-top:24px}#message{min-height:2rem}
+.summary{font-size:1.15rem;font-weight:700}
+@media(max-width:550px){.item{grid-template-columns:1fr 110px}.item button{grid-column:1/-1}}
 </style>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 </head>
 <body>
 <main>
-  <p><a href="/">Street Face</a> / Development test</p>
-  <h1>Stripe sandbox checkout pilot</h1>
-  <p class="notice"><strong>Test environment only.</strong> This unlinked page is for authorised testing. It will generate a Stripe test-mode Checkout Session only after Cloudflare verification. Do not enter a real card.</p>
-  <form id="test-form">
-    <label for="design-code">Design code</label>
-    <input id="design-code" name="design-code" required pattern="HB-[0-9]{4}" placeholder="HB-0001" maxlength="7" autocomplete="off">
-    <label for="quantity">Number of mugs (1–4)</label>
-    <input id="quantity" name="quantity" type="number" min="1" max="4" step="1" value="1" required>
-    <div id="verification"></div>
-    <button type="submit" id="submit" disabled>Verify and go to Stripe test checkout</button>
-  </form>
-  <p id="message" role="status" aria-live="polite">Loading verification…</p>
-  <p><a href="/">Return to the collection</a></p>
+<p><a href="/">Street Face</a> / Development test</p>
+<h1>Multi-street Stripe sandbox checkout</h1>
+<p class="notice"><strong>Test environment only.</strong> Select up to four mugs across different streets, verify with Cloudflare and pay using a Stripe test card. No real cards or manufacturing orders.</p>
+<form id="test-form">
+  <div id="items" aria-label="Selected street designs"></div>
+  <button id="add" class="secondary" type="button">+ Add another street</button>
+  <p id="summary" class="summary" aria-live="polite">1 mug — £20.00, UK delivery included</p>
+  <div id="verification"></div>
+  <button type="submit" id="submit" disabled>Verify and go to Stripe test checkout</button>
+</form>
+<p id="message" role="status" aria-live="polite">Loading verification…</p>
+<p><a href="/">Return to the collection</a></p>
 </main>
 <script>
 (() => {
@@ -37,62 +41,115 @@ button:disabled{opacity:.55;cursor:not-allowed}.notice{background:#f4f4f4;paddin
   const endpoint = 'https://ngmdsmmvdnbnxeozpfej.supabase.co/functions/v1/create-checkout';
   const sitekey = '0x4AAAAAAFre62PDcKvlR3VS';
   const form = document.getElementById('test-form');
+  const container = document.getElementById('items');
+  const add = document.getElementById('add');
+  const summary = document.getElementById('summary');
   const button = document.getElementById('submit');
   const message = document.getElementById('message');
   let token = '';
   let widgetId = null;
   let submitting = false;
-  function setToken(value) {
-    token = value;
-    button.disabled = submitting || !token;
-    message.textContent = token ? 'Verification complete. Ready to start Stripe test checkout.' : 'Please complete verification.';
+  let nextId = 0;
+  function readItems() {
+    const rows = [...container.querySelectorAll('.item')];
+    const items = rows.map(row => ({
+      design_code: row.querySelector('.design-code').value.trim().toUpperCase(),
+      quantity: Number(row.querySelector('.quantity').value)
+    }));
+    const total = items.reduce((sum, item) => sum + item.quantity, 0);
+    const valid = items.length > 0 && items.length <= 4 && total >= 1 && total <= 4 &&
+      items.every(item => /^HB-\d{4}$/.test(item.design_code) &&
+        Number.isInteger(item.quantity) && item.quantity >= 1 && item.quantity <= 4) &&
+      new Set(items.map(item => item.design_code)).size === items.length;
+    return {items, total, valid};
   }
-  function initialise() {
-    if (!window.turnstile) {
-      message.textContent = 'Verification failed to load. Refresh the page.';
-      return;
-    }
-    widgetId = window.turnstile.render('#verification', {
-      sitekey,
-      callback: setToken,
-      'expired-callback': () => setToken(''),
-      'error-callback': () => setToken(''),
+  function refresh() {
+    const {items,total,valid} = readItems();
+    summary.textContent = total >= 0
+      ? `${total} mug${total === 1 ? '' : 's'} — £${(total * 20).toFixed(2)}, UK delivery included`
+      : 'Invalid quantity';
+    add.disabled = items.length >= 4 || total >= 4 || submitting;
+    container.querySelectorAll('.remove').forEach(remove => {
+      remove.disabled = items.length === 1 || submitting;
     });
-    message.textContent = 'Please complete verification.';
+    button.disabled = submitting || !token || !valid;
+    if (!valid && items.every(item => item.design_code && item.quantity)) {
+      message.textContent = 'Use unique HB-0000 design codes, with at most four mugs in total.';
+    } else if (token) {
+      message.textContent = 'Verification complete. Ready to start Stripe test checkout.';
+    }
   }
-  window.addEventListener('load', initialise, {once:true});
-  form.addEventListener('submit', async event => {
+  function appendRow(code = '',quantity = 1) {
+    const id = ++nextId;
+    const row = document.createElement('div');
+    row.className = 'item';
+    const codeWrap = document.createElement('div');
+    const codeLabel = document.createElement('label');
+    codeLabel.htmlFor = `code-${id}`;
+    codeLabel.textContent = `Street design ${id}`;
+    const codeInput = document.createElement('input');
+    codeInput.id = `code-${id}`;
+    codeInput.className = 'design-code';
+    codeInput.placeholder = 'HB-0001';
+    codeInput.maxLength = 7;
+    codeInput.pattern = 'HB-[0-9]{4}';
+    codeInput.autocomplete = 'off';
+    codeInput.required = true;
+    codeInput.value = code;
+    codeWrap.append(codeLabel,codeInput);
+    const qtyWrap = document.createElement('div');
+    const qtyLabel = document.createElement('label');
+    qtyLabel.htmlFor = `qty-${id}`;
+    qtyLabel.textContent = 'Quantity';
+    const qtyInput = document.createElement('input');
+    qtyInput.id = `qty-${id}`;
+    qtyInput.className = 'quantity';
+    qtyInput.type = 'number';
+    qtyInput.min = 1;
+    qtyInput.max = 4;
+    qtyInput.step = 1;
+    qtyInput.required = true;
+    qtyInput.value = quantity;
+    qtyWrap.append(qtyLabel,qtyInput);
+    const remove = document.createElement('button');
+    remove.className = 'secondary remove';
+    remove.type = 'button';
+    remove.textContent = 'Remove';
+    remove.setAttribute('aria-label', `Remove street design ${id}`);
+    remove.addEventListener('click', () => {row.remove();refresh();});
+    row.append(codeWrap,qtyWrap,remove);
+    row.addEventListener('input',refresh);
+    container.append(row);
+    refresh();
+  }
+  add.addEventListener('click', () => {const {items,total} = readItems();if(items.length<4&&total<4)appendRow();});
+  function setToken(value) {token=value;refresh();if (!value)message.textContent='Please complete verification.';}
+  window.addEventListener('load', () => {
+    if (!window.turnstile) {message.textContent='Verification failed to load. Refresh the page.';return;}
+    widgetId=window.turnstile.render('#verification',{
+      sitekey,callback:setToken,
+      'expired-callback':()=>setToken(''),
+      'error-callback':()=>setToken('')
+    });
+    message.textContent='Please complete verification.';
+  }, {once:true});
+  appendRow('HB-0001',1);
+  form.addEventListener('submit',async event=>{
     event.preventDefault();
-    if (submitting || !token || !form.reportValidity()) return;
-    const design = document.getElementById('design-code').value.trim().toUpperCase();
-    const quantity = Number(document.getElementById('quantity').value);
-    if (!/^HB-\d{4}$/.test(design) || !Number.isInteger(quantity) || quantity < 1 || quantity > 4) {
-      message.textContent = 'Enter a valid design code and quantity.';
-      return;
-    }
-    submitting = true;
-    button.disabled = true;
-    message.textContent = 'Creating Stripe test session…';
+    const {items,valid}=readItems();
+    if(submitting||!token||!valid||!form.reportValidity())return;
+    submitting=true;refresh();message.textContent='Creating Stripe test session…';
     try {
-      const response = await fetch(endpoint, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({items:[{design_code:design,quantity}],turnstile_token:token}),
+      const response=await fetch(endpoint,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({items,turnstile_token:token})
       });
-      const result = await response.json();
-      if (!response.ok || typeof result.url !== 'string' ||
-          new URL(result.url).hostname !== 'checkout.stripe.com') {
-        throw new Error('Checkout could not be created (' + response.status + ').');
-      }
+      const result=await response.json();
+      if(!response.ok||typeof result.url!=='string'||new URL(result.url).hostname!=='checkout.stripe.com')
+        throw new Error('Checkout could not be created ('+response.status+').');
       window.location.assign(result.url);
-    } catch (error) {
-      message.textContent = error.message || 'Checkout unavailable.';
-    } finally {
-      submitting = false;
-      token = '';
-      if (widgetId !== null && window.turnstile) window.turnstile.reset(widgetId);
-      button.disabled = true;
-    }
+    } catch(error) {message.textContent=error.message||'Checkout unavailable.';}
+    finally {submitting=false;token='';if(widgetId!==null&&window.turnstile)window.turnstile.reset(widgetId);refresh();}
   });
 })();
 </script>
