@@ -47,17 +47,13 @@ async function requestCheckout() {
   checkoutNote.textContent = 'Verifying checkout…';
   try {
     await loadTurnstile();
-    if (turnstileWidgetId === null) {
-      checkoutVerification.hidden = false;
-      turnstileWidgetId = window.turnstile.render(checkoutVerification, {
-        sitekey: config.turnstileSiteKey,
-        execution: 'execute',
-        appearance: 'execute',
-      });
-    }
+    checkoutVerification.hidden = false;
     const token = await new Promise((resolve, reject) => {
       let completed = false;
-      window.turnstile.remove(turnstileWidgetId);
+      if (turnstileWidgetId !== null) {
+        window.turnstile.remove(turnstileWidgetId);
+        turnstileWidgetId = null;
+      }
       turnstileWidgetId = window.turnstile.render(checkoutVerification, {
         sitekey: config.turnstileSiteKey,
         execution: 'execute',
