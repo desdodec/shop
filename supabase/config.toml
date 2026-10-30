@@ -3,3 +3,6 @@ verify_jwt = false
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+[functions.reconcile-checkout-expiry]
+verify_jwt = false # Authenticated by private x-reconciliation-token; never public access.
