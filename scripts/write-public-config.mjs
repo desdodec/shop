@@ -43,6 +43,8 @@ const config = {
   supabaseUrl: required('SUPABASE_URL'),
   supabasePublishableKey: required('SUPABASE_PUBLISHABLE_KEY'),
   mockupBaseUrl: required('MOCKUP_BASE_URL'),
+  turnstileSiteKey: '0x4AAAAAAFre62PDcKvlR3VS',
+  checkoutEnabled: false, // Explicitly locked until integration/security tests pass.
   collection: {
     id: collection.id,
     name: collection.name,
