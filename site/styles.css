@@ -65,3 +65,13 @@ body.lightbox-open{overflow:hidden}
 .lightbox-toolbar button[aria-pressed="true"]{background:#262b28;border-color:#262b28;color:white}
 .lightbox-toolbar button:disabled{opacity:.4;cursor:default}
 @media(max-width:540px){.image-lightbox{padding:5px;gap:5px}.lightbox-toolbar{gap:8px}.lightbox-toolbar button{padding:9px 12px}}
+
+/* Multi-design basket: compact quantity controls and clear order total. */
+.basket-quantity{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.basket-quantity button{width:30px;height:32px;padding:0;border:1px solid #d4d0c8;border-radius:6px;background:#f5f2ed;color:#262b28;font-size:1.1rem;font-weight:700}
+.basket-quantity button:disabled{opacity:.35;cursor:not-allowed}
+.quantity-value{min-width:19px;text-align:center;font-weight:750;font-variant-numeric:tabular-nums}
+.basket-summary{margin-top:18px;padding:14px 12px;background:#f5f2ed;border-radius:8px;font-weight:750;font-size:.9rem;color:#262b28}
+.selected-design{flex-wrap:wrap}
+.selected-design .remove-selected{padding:6px 5px}
+@media(max-width:480px){.selected-design{gap:7px}.selected-thumbnail{width:48px;height:48px}.basket-quantity button{width:28px}}
