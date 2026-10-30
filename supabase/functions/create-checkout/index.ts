@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
     const siteUrl = new URL(origin);
     const params = new URLSearchParams();
     params.set("mode","payment");
-    params.set("payment_method_types[0]","card");
+    // Stripe manages eligible payment methods in its Dashboard; do not pass payment_method_types.
     params.set("client_reference_id",order.id);
     params.set("metadata[order_id]",order.id);
     params.set("success_url",new URL("/checkout-success/?session_id={CHECKOUT_SESSION_ID}",siteUrl).toString().replace("%7BCHECKOUT_SESSION_ID%7D","{CHECKOUT_SESSION_ID}"));
