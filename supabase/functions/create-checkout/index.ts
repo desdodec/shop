@@ -10,8 +10,11 @@ const json = (body: unknown, status = 200, origin = "") => new Response(JSON.str
   status, headers: { "content-type": "application/json", "access-control-allow-origin": origin, "vary": "Origin" }
 });
 const originAllowed = (origin: string) => {
-  const allowed = Deno.env.get("ALLOWED_ORIGIN") ?? Deno.env.get("SITE_URL") ?? "";
-  return !!origin && new URL(origin).origin === new URL(allowed).origin;
+  const primary = Deno.env.get("ALLOWED_ORIGIN") ?? Deno.env.get("SITE_URL") ?? "";
+  const pilot = Deno.env.get("CHECKOUT_PILOT_ORIGIN") ?? "";
+  try {
+    return !!origin && [primary, pilot].filter(Boolean).some(value => new URL(origin).origin === new URL(value).origin);
+  } catch { return false; }
 };
 const unitPence = 2000; // £20 including UK delivery
 const sku = "GLOBAL-MUG-W";
@@ -50,7 +53,7 @@ Deno.serve(async (req) => {
     const turnstileResult = await verification.json();
     if (turnstileResult.success !== true)
       return json({error:"Checkout verification failed; please try again"},403,origin);
-    const expectedHostname = new URL(Deno.env.get("SITE_URL")!).hostname;
+    const expectedHostname = new URL(origin).hostname;
     if (turnstileResult.hostname !== expectedHostname)
       return json({error:"Checkout verification failed"},403,origin);
     if (!Array.isArray(payload.items) || !payload.items.length || payload.items.length > 4) return json({error:"Select 1–4 designs"},400,origin);
@@ -83,13 +86,14 @@ Deno.serve(async (req) => {
       await db.from("checkout_orders").update({checkout_status:"hold",hold_reason:"Could not snapshot lines"}).eq("id",order.id);
       throw new Error("Could not save order lines");
     }
-    const siteUrl = new URL(Deno.env.get("SITE_URL")!);
+    // Stripe sends the buyer back to the same approved origin that initiated checkout.
+    const siteUrl = new URL(origin);
     const params = new URLSearchParams();
     params.set("mode","payment");
     params.set("payment_method_types[0]","card");
     params.set("client_reference_id",order.id);
     params.set("metadata[order_id]",order.id);
-    params.set("success_url",new URL("/checkout-success?session_id={CHECKOUT_SESSION_ID}",siteUrl).toString().replace("%7BCHECKOUT_SESSION_ID%7D","{CHECKOUT_SESSION_ID}"));
+    params.set("success_url",new URL("/checkout-success/?session_id={CHECKOUT_SESSION_ID}",siteUrl).toString().replace("%7BCHECKOUT_SESSION_ID%7D","{CHECKOUT_SESSION_ID}"));
     params.set("cancel_url",new URL("/?checkout=cancelled",siteUrl).toString());
     params.set("shipping_address_collection[allowed_countries][0]","GB");
     lines.forEach((l,i)=>{
