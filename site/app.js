@@ -38,7 +38,7 @@ async function loadTurnstile() {
 
 async function requestCheckout() {
   if (!config.checkoutEnabled || checkoutBusy) return;
-  if (!selectedDesigns.length || selectedDesigns.length > 4) {
+  if (!selectedDesigns.length || basketCount() > 4) {
     checkoutNote.textContent = 'Select between one and four different mugs.';
     return;
   }
@@ -69,7 +69,7 @@ async function requestCheckout() {
       method: 'POST',
       headers: {'content-type': 'application/json'},
       body: JSON.stringify({
-        items: selectedDesigns.map(item => ({design_code: item.design_code, quantity: 1})),
+        items: selectedDesigns.map(item => ({design_code: item.design_code, quantity: item.quantity})),
         turnstile_token: token,
       }),
     });
@@ -83,7 +83,7 @@ async function requestCheckout() {
     checkoutNote.textContent = 'Could not start checkout. Please try again.';
   } finally {
     checkoutBusy = false;
-    checkoutButton.disabled = !config.checkoutEnabled || selectedDesigns.length < 1 || selectedDesigns.length > 4;
+    checkoutButton.disabled = !config.checkoutEnabled || selectedDesigns.length < 1 || basketCount() > 4;
   }
 }
 checkoutButton.addEventListener('click', requestCheckout);
@@ -236,10 +236,25 @@ function loadSelections() {
       ?? (collection.id === 'hebden-bridge' ? localStorage.getItem(LEGACY_STORAGE_KEY) : null);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item) => item?.design_code && item?.street_name);
+    return parsed.filter((item) => item?.design_code && item?.street_name)
+      .map((item) => ({...item, quantity: Number.isInteger(item.quantity) && item.quantity >= 1 && item.quantity <= 4 ? item.quantity : 1}));
   } catch {
     return [];
   }
+}
+
+function basketCount() {
+  return selectedDesigns.reduce((total, item) => total + item.quantity, 0);
+}
+
+function changeQuantity(designCode, delta) {
+  const current = selectedDesigns.find(item => item.design_code === designCode);
+  if (!current || checkoutBusy) return;
+  const next = current.quantity + delta;
+  if (next < 1 || next > 4 || (delta > 0 && basketCount() >= 4)) return;
+  current.quantity = next;
+  saveSelections();
+  renderSelectionTray();
 }
 
 function saveSelections() {
@@ -258,6 +273,7 @@ function selectionSnapshot(item) {
     locality: item.locality,
     front_mockup_key: item.front_mockup_key,
     rear_mockup_key: item.rear_mockup_key,
+    quantity: item.quantity ?? 1,
   };
 }
 
@@ -369,12 +385,15 @@ function refreshMapSelections() {
 
 function renderSelectionTray() {
   selectedDesignsContainer.replaceChildren();
-  collectionCount.textContent = String(selectedDesigns.length);
+  const totalQty = basketCount();
+  collectionCount.textContent = String(totalQty);
+  const basketSummary = document.querySelector('#basket-summary');
+  basketSummary.textContent = `${totalQty} mug${totalQty === 1 ? '' : 's'} · £${(totalQty * 20).toFixed(2)} · UK delivery included`;
   collectionEmpty.hidden = selectedDesigns.length > 0;
-  checkoutButton.disabled = !config.checkoutEnabled || checkoutBusy || selectedDesigns.length < 1 || selectedDesigns.length > 4;
+  checkoutButton.disabled = !config.checkoutEnabled || checkoutBusy || selectedDesigns.length < 1 || totalQty > 4;
   if (config.checkoutEnabled) {
-    checkoutButton.textContent = 'Secure checkout — £20 per mug';
-    checkoutNote.textContent = selectedDesigns.length > 4
+    checkoutButton.textContent = `Secure checkout · £${(totalQty * 20).toFixed(2)}`;
+    checkoutNote.textContent = totalQty > 4
       ? 'The pilot checkout supports up to four mugs.'
       : 'UK delivery included. Payment is processed securely by Stripe.';
   }
@@ -417,6 +436,15 @@ function renderSelectionTray() {
       renderDesign(item);
     });
 
+    fragment.querySelector('.quantity-value').textContent = String(savedItem.quantity);
+    const minus = fragment.querySelector('.quantity-minus');
+    const plus = fragment.querySelector('.quantity-plus');
+    minus.disabled = checkoutBusy || savedItem.quantity <= 1;
+    plus.disabled = checkoutBusy || totalQty >= 4;
+    minus.setAttribute('aria-label', `Remove one ${item.street_name} mug`);
+    plus.setAttribute('aria-label', `Add one ${item.street_name} mug`);
+    minus.addEventListener('click', () => changeQuantity(savedItem.design_code, -1));
+    plus.addEventListener('click', () => changeQuantity(savedItem.design_code, 1));
     const removeButton = fragment.querySelector('.remove-selected');
     removeButton.setAttribute('aria-label', `Remove ${item.street_name} (${item.design_code})`);
     removeButton.addEventListener('click', () => toggleSelection(item));
@@ -442,7 +470,7 @@ function hydrateSelectionsFromCatalogue(catalogueItems) {
     ) {
       changed = true;
     }
-    return hydrated;
+    return {...hydrated, quantity: savedItem.quantity};
   });
 
   if (changed) saveSelections();
@@ -472,6 +500,12 @@ function toggleSelection(item) {
   if (isSelected(item.design_code)) {
     selectedDesigns = selectedDesigns.filter((selected) => selected.design_code !== item.design_code);
   } else {
+    if (basketCount() >= 4) {
+      const note = document.querySelector('#checkout-note');
+      note.textContent = 'The basket supports up to four mugs.';
+      openCollection();
+      return;
+    }
     selectedDesigns = [...selectedDesigns, selectionSnapshot(item)];
   }
 
