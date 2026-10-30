@@ -16,7 +16,11 @@ language plpgsql security definer
 set search_path = public
 as $$
 begin
-  if auth.role() is distinct from 'service_role' then
+  -- SQL Editor runs as the trusted postgres database session, while
+  -- server-side Edge Functions use the service_role JWT via PostgREST.
+  -- SECURITY DEFINER changes current_user; session_user remains the caller.
+  if auth.role() is distinct from 'service_role'
+     and session_user <> 'postgres' then
     raise exception 'Forbidden';
   end if;
   return query
