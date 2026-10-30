@@ -70,6 +70,7 @@
 
       <div id="selected-designs" class="selected-designs"></div><p id="collection-empty" class="collection-empty">No mugs added yet. Find a street to get started.</p>
 
+      <p id="basket-summary" class="basket-summary" aria-live="polite">0 mugs · £0.00 · UK delivery included</p>
       <div class="selection-actions">
         <button id="copy-design-ids" class="secondary-button" type="button">Copy Design IDs</button>
         <button class="checkout-button" type="button" disabled aria-describedby="checkout-note">Checkout coming soon</button>
@@ -139,6 +140,11 @@
         </span>
         <span class="review-label">Preview</span>
       </button>
+      <div class="basket-quantity" role="group" aria-label="Mug quantity">
+        <button class="quantity-minus" type="button">−</button>
+        <span class="quantity-value" aria-live="polite">1</span>
+        <button class="quantity-plus" type="button">+</button>
+      </div>
       <button class="remove-selected" type="button" aria-label="Remove selected design">Remove</button>
     </div>
   </template>
