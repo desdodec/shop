@@ -42,6 +42,11 @@ begin
     raise exception 'Stripe session not yet persisted, retry webhook';
   end if;
 
+  -- Once an event has been reconciled, retries must be strictly read-only.
+  if exists(select 1 from public.stripe_webhook_events where stripe_event_id = p_event_id) then
+    return 'duplicate';
+  end if;
+
   -- Stripe session identity must be persisted before its webhook is reconciled.
   if o.stripe_checkout_session_id is distinct from p_session_id
      or o.currency is distinct from lower(p_currency)
@@ -52,10 +57,6 @@ begin
     insert into public.stripe_webhook_events(stripe_event_id,event_type,checkout_order_id)
       values(p_event_id,p_event_type,p_order_id) on conflict do nothing;
     return 'hold_mismatch';
-  end if;
-
-  if exists(select 1 from public.stripe_webhook_events where stripe_event_id = p_event_id) then
-    return 'duplicate';
   end if;
 
   -- LEFT joins prevent missing catalogue records from disappearing from validation.
