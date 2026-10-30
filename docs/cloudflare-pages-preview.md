@@ -13,3 +13,5 @@ This file documents the preview build for the `feature/stripe-sandbox-checkout` 
 - Stripe sandbox keys only; no automatic Prodigi fulfilment.
 
 Created to trigger the first branch preview after connecting the GitHub repository to Cloudflare Pages.
+
+GitHub connection was restored on 2026-10-30. This documentation-only change requests a new branch-preview build.
