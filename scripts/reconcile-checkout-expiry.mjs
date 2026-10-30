@@ -5,7 +5,7 @@
  * Required environment variables:
  *   STRIPE_SECRET_KEY=sk_test_...
  *   SUPABASE_URL=https://<project>.supabase.co
- *   SUPABASE_SERVICE_ROLE_KEY=<server-side key>
+ *   SUPABASE_SECRET_KEY=sb_secret_...
  *
  * Run: node scripts/reconcile-checkout-expiry.mjs
  * Apply verified expiry: node scripts/reconcile-checkout-expiry.mjs --apply
@@ -18,13 +18,13 @@ if (process.argv.some(arg => arg.startsWith('--') && arg !== '--apply')) {
 }
 const stripeKey = process.env.STRIPE_SECRET_KEY ?? '';
 const supabaseUrl = process.env.SUPABASE_URL ?? '';
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-if (!stripeKey.startsWith('sk_test_') || !/^https:\/\/[^/]+\.supabase\.co\/?$/.test(supabaseUrl) || !serviceKey) {
-  console.error('Missing sandbox STRIPE_SECRET_KEY, SUPABASE_URL, or SUPABASE_SERVICE_ROLE_KEY');
+const serviceKey = process.env.SUPABASE_SECRET_KEY ?? '';
+if (!stripeKey.startsWith('sk_test_') || !/^https:\/\/[^/]+\.supabase\.co\/?$/.test(supabaseUrl) || !serviceKey.startsWith('sb_secret_')) {
+  console.error('Missing sandbox STRIPE_SECRET_KEY, SUPABASE_URL, or SUPABASE_SECRET_KEY');
   process.exit(2);
 }
 const base = supabaseUrl.replace(/\/$/, '');
-const dbHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+const dbHeaders = { apikey: serviceKey };
 async function jsonResponse(response, label) {
   if (!response.ok) throw new Error(`${label} failed (HTTP ${response.status})`);
   return response.json();
