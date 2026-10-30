@@ -44,7 +44,11 @@ const config = {
   supabasePublishableKey: required('SUPABASE_PUBLISHABLE_KEY'),
   mockupBaseUrl: required('MOCKUP_BASE_URL'),
   turnstileSiteKey: '0x4AAAAAAFre62PDcKvlR3VS',
-  checkoutEnabled: false, // Explicitly locked until integration/security tests pass.
+  // Only permit the Stripe SANDBOX checkout on the intended Pages preview branch,
+  // and only after its preview-only feature flag is explicitly enabled.
+  // Production 'main' always stays disabled, irrespective of environment flags.
+  checkoutEnabled: process.env.CF_PAGES_BRANCH === 'feature/stripe-sandbox-checkout'
+    && process.env.CHECKOUT_SANDBOX_ENABLED === 'true',
   collection: {
     id: collection.id,
     name: collection.name,
