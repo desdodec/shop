@@ -20,7 +20,7 @@ Deno.serve(async (request) => {
 
   const signature = request.headers.get("stripe-signature");
   if (!signature) return new Response("Missing signature", { status: 400 });
-  const stripe = new Stripe(key, { apiVersion: "2024-12-18.acacia" });
+  const stripe = new Stripe(key, { apiVersion: "2025-02-24.acacia" });
 
   let event: Stripe.Event;
   try {
