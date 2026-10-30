@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Street Face — Stripe sandbox test only</title>
+<style>
+body{font:16px/1.55 system-ui,sans-serif;max-width:620px;margin:4rem auto;padding:0 1.2rem;color:#202020}
+h1{line-height:1.15}label{display:block;margin-top:20px;font-weight:600}
+input,button{font:inherit;padding:.7rem;border-radius:5px}input{width:100%;box-sizing:border-box;border:1px solid #999}
+button{background:#181818;color:#fff;border:0;cursor:pointer;margin-top:20px}
+button:disabled{opacity:.55;cursor:not-allowed}.notice{background:#f4f4f4;padding:12px;border-radius:5px}
+#verification{margin-top:24px}#message{min-height:2rem}
+</style>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+</head>
+<body>
+<main>
+  <p><a href="/">Street Face</a> / Development test</p>
+  <h1>Stripe sandbox checkout pilot</h1>
+  <p class="notice"><strong>Test environment only.</strong> This unlinked page is for authorised testing. It will generate a Stripe test-mode Checkout Session only after Cloudflare verification. Do not enter a real card.</p>
+  <form id="test-form">
+    <label for="design-code">Design code</label>
+    <input id="design-code" name="design-code" required pattern="HB-[0-9]{4}" placeholder="HB-0001" maxlength="7" autocomplete="off">
+    <label for="quantity">Number of mugs (1–4)</label>
+    <input id="quantity" name="quantity" type="number" min="1" max="4" step="1" value="1" required>
+    <div id="verification"></div>
+    <button type="submit" id="submit" disabled>Verify and go to Stripe test checkout</button>
+  </form>
+  <p id="message" role="status" aria-live="polite">Loading verification…</p>
+  <p><a href="/">Return to the collection</a></p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const endpoint = 'https://ngmdsmmvdnbnxeozpfej.supabase.co/functions/v1/create-checkout';
+  const sitekey = '0x4AAAAAAFre62PDcKvlR3VS';
+  const form = document.getElementById('test-form');
+  const button = document.getElementById('submit');
+  const message = document.getElementById('message');
+  let token = '';
+  let widgetId = null;
+  let submitting = false;
+  function setToken(value) {
+    token = value;
+    button.disabled = submitting || !token;
+    message.textContent = token ? 'Verification complete. Ready to start Stripe test checkout.' : 'Please complete verification.';
+  }
+  function initialise() {
+    if (!window.turnstile) {
+      message.textContent = 'Verification failed to load. Refresh the page.';
+      return;
+    }
+    widgetId = window.turnstile.render('#verification', {
+      sitekey,
+      callback: setToken,
+      'expired-callback': () => setToken(''),
+      'error-callback': () => setToken(''),
+    });
+    message.textContent = 'Please complete verification.';
+  }
+  window.addEventListener('load', initialise, {once:true});
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (submitting || !token || !form.reportValidity()) return;
+    const design = document.getElementById('design-code').value.trim().toUpperCase();
+    const quantity = Number(document.getElementById('quantity').value);
+    if (!/^HB-\d{4}$/.test(design) || !Number.isInteger(quantity) || quantity < 1 || quantity > 4) {
+      message.textContent = 'Enter a valid design code and quantity.';
+      return;
+    }
+    submitting = true;
+    button.disabled = true;
+    message.textContent = 'Creating Stripe test session…';
+    try {
+      const response = await fetch(endpoint, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({items:[{design_code:design,quantity}],turnstile_token:token}),
+      });
+      const result = await response.json();
+      if (!response.ok || typeof result.url !== 'string' ||
+          new URL(result.url).hostname !== 'checkout.stripe.com') {
+        throw new Error('Checkout could not be created (' + response.status + ').');
+      }
+      window.location.assign(result.url);
+    } catch (error) {
+      message.textContent = error.message || 'Checkout unavailable.';
+    } finally {
+      submitting = false;
+      token = '';
+      if (widgetId !== null && window.turnstile) window.turnstile.reset(widgetId);
+      button.disabled = true;
+    }
+  });
+})();
+</script>
+</body>
+</html>
