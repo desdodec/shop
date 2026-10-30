@@ -16,6 +16,82 @@ if (
   throw new Error('Storefront configuration is missing.');
 }
 
+// Checkout remains disabled in generated config until the sandbox flow is tested.
+// This does not run Turnstile or create Stripe sessions on the current public site.
+const checkoutButton = document.querySelector('.checkout-button');
+const checkoutNote = document.querySelector('#checkout-note');
+const checkoutVerification = document.querySelector('#checkout-verification');
+let checkoutBusy = false;
+let turnstileWidgetId = null;
+
+async function loadTurnstile() {
+  if (window.turnstile) return;
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Verification could not load'));
+    document.head.append(script);
+  });
+}
+
+async function requestCheckout() {
+  if (!config.checkoutEnabled || checkoutBusy) return;
+  if (!selectedDesigns.length || selectedDesigns.length > 4) {
+    checkoutNote.textContent = 'Select between one and four different mugs.';
+    return;
+  }
+  checkoutBusy = true;
+  checkoutButton.disabled = true;
+  checkoutNote.textContent = 'Verifying checkout…';
+  try {
+    await loadTurnstile();
+    if (turnstileWidgetId === null) {
+      checkoutVerification.hidden = false;
+      turnstileWidgetId = window.turnstile.render(checkoutVerification, {
+        sitekey: config.turnstileSiteKey,
+        execution: 'execute',
+        appearance: 'execute',
+      });
+    }
+    const token = await new Promise((resolve, reject) => {
+      let completed = false;
+      window.turnstile.remove(turnstileWidgetId);
+      turnstileWidgetId = window.turnstile.render(checkoutVerification, {
+        sitekey: config.turnstileSiteKey,
+        execution: 'execute',
+        appearance: 'execute',
+        callback: (value) => { if (!completed) { completed = true; resolve(value); } },
+        'error-callback': () => { if (!completed) { completed = true; reject(new Error('Verification failed')); } },
+        'timeout-callback': () => { if (!completed) { completed = true; reject(new Error('Verification timed out')); } },
+      });
+      window.turnstile.execute(turnstileWidgetId);
+    });
+    checkoutNote.textContent = 'Preparing secure checkout…';
+    const response = await fetch(`${config.supabaseUrl}/functions/v1/create-checkout`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        items: selectedDesigns.map(item => ({design_code: item.design_code, quantity: 1})),
+        turnstile_token: token,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.url || new URL(result.url).hostname !== 'checkout.stripe.com') {
+      throw new Error('Checkout unavailable. Please try again later.');
+    }
+    window.location.assign(result.url);
+  } catch (error) {
+    console.error('Checkout could not start:', error);
+    checkoutNote.textContent = 'Could not start checkout. Please try again.';
+  } finally {
+    checkoutBusy = false;
+    checkoutButton.disabled = !config.checkoutEnabled || selectedDesigns.length < 1 || selectedDesigns.length > 4;
+  }
+}
+checkoutButton.addEventListener('click', requestCheckout);
+
 const LEGACY_STORAGE_KEY = 'street-face-selected-designs-v1';
 const STORAGE_KEY = `${LEGACY_STORAGE_KEY}:${collection.id}`;
 const SUGGESTION_LIMIT = 12;
@@ -299,6 +375,14 @@ function renderSelectionTray() {
   selectedDesignsContainer.replaceChildren();
   collectionCount.textContent = String(selectedDesigns.length);
   collectionEmpty.hidden = selectedDesigns.length > 0;
+  checkoutButton.disabled = !config.checkoutEnabled || checkoutBusy || selectedDesigns.length < 1 || selectedDesigns.length > 4;
+  if (config.checkoutEnabled) {
+    checkoutButton.textContent = 'Secure checkout — £20 per mug';
+    checkoutNote.textContent = selectedDesigns.length > 4
+      ? 'The pilot checkout supports up to four mugs.'
+      : 'UK delivery included. Payment is processed securely by Stripe.';
+  }
+
 
   for (const savedItem of selectedDesigns) {
     const item = mapItemsByDesignCode.get(savedItem.design_code) ?? savedItem;
