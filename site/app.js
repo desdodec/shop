@@ -706,11 +706,20 @@ async function initialiseStreetMap() {
 
     const geojson = await geojsonResponse.json();
     const catalogueByFeatureIndex = new Map();
+    const catalogueByStreetKey = new Map();
     mapItemsByDesignCode.clear();
 
     for (const item of catalogueItems) {
-      const featureIndex = mapFeatureIndex(item);
-      if (featureIndex !== null) catalogueByFeatureIndex.set(featureIndex, item);
+      const streetId = String(item.street_id ?? '').trim();
+      if (streetId && !/^\\d+$/.test(streetId)) {
+        if (catalogueByStreetKey.has(streetId)) {
+          throw new Error(`Duplicate geographic street identity in catalogue: ${streetId}`);
+        }
+        catalogueByStreetKey.set(streetId, item);
+      } else {
+        const featureIndex = mapFeatureIndex(item);
+        if (featureIndex !== null) catalogueByFeatureIndex.set(featureIndex, item);
+      }
       mapItemsByDesignCode.set(item.design_code, item);
     }
 
@@ -718,7 +727,9 @@ async function initialiseStreetMap() {
 
     const availableFeatures = geojson.features
       .map((feature, index) => {
-        const item = catalogueByFeatureIndex.get(index);
+        const streetKey = String(feature.properties?.street_key ?? '').trim();
+        const item = (streetKey ? catalogueByStreetKey.get(streetKey) : null)
+          ?? catalogueByFeatureIndex.get(index);
         if (!item) return null;
         return {
           ...feature,
