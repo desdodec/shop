@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore available Hebden Bridge Street Face mug designs on a map or find a street by name.">
+  <title>Hebden Bridge v2 Review | Street Face</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.14.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="/styles.css">
+<style>.v2-review-banner{padding:12px 20px;background:#fff3db;color:#37220b;text-align:center;font-weight:600}</style></head>
+<body><div class="v2-review-banner">HEBDEN BRIDGE V2 REVIEW · 311 HELD DESIGNS · CHECKOUT DISABLED · POSTCODE DISTRICTS FROM GENERATOR</div>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Street Face home">Street Face</a>
+    <span class="pilot">Hebden Bridge v2 · Review only</span>
+    <button id="open-collection" class="collection-trigger" type="button" aria-controls="selection-tray" aria-expanded="false">My mugs <span id="collection-count">0</span></button>
+  </header>
+
+  <main class="workspace">
+    <div class="workspace-heading">
+      <div><p class="eyebrow">A mug built around somewhere that matters</p><h1>Find your street</h1></div>
+      <p class="hero-copy">A place that matters, made yours. Find a street, see its mug, and collect your favourites.</p>
+    </div>
+    <div class="workspace-columns">
+      <section class="discovery-panel" aria-label="Find a street">
+        <form id="search-form" class="search" role="search">
+          <label for="search-input">Find a street</label>
+          <div class="search-row">
+            <input id="search-input" name="q" type="search" inputmode="search" autocomplete="off" placeholder="Try Burnley Road" maxlength="100" aria-describedby="search-help">
+            <button type="submit">Find</button>
+          </div>
+          <p id="search-help" class="search-help">Just a few letters will do.</p>
+        </form>
+        <div class="search-meta">
+          <div id="status" class="status" role="status" aria-live="polite">Start typing or click a street on the map.</div>
+          <button id="clear-search" class="text-button" type="button" hidden>Clear</button>
+        </div>
+        <section class="finder-matches" aria-labelledby="finder-title" hidden>
+          <div class="results-heading"><h2 id="finder-title">Matching streets</h2><span id="finder-count" class="result-count"></span></div>
+          <div id="finder-results" class="finder-results"></div>
+        </section>
+        <section class="map-panel" aria-labelledby="map-title">
+          <div class="map-heading">
+            <div><p class="map-kicker">Available now</p><h2 id="map-title">Explore on the map</h2></div>
+            <p id="map-status" class="map-status" role="status" aria-live="polite">Loading streets…</p>
+          </div>
+          <div id="street-map" class="street-map" aria-label="Map of available Street Face streets"></div>
+          <p class="map-help">Select a highlighted street to see its mug.</p>
+        </section>
+      </section>
+      <section class="results-wrap" aria-labelledby="results-title">
+        <div class="results-heading"><h2 id="results-title">Your mug preview</h2><span id="result-count" class="result-count"></span></div>
+        <div id="results" class="results">
+          <div class="preview-placeholder"><span class="placeholder-mark">SF</span><p class="map-kicker">MADE FOR YOUR STREET</p><h3>Your street. Your mug.</h3><p>Search or explore the map to see your design here.</p></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="selection-tray" class="selection-tray" role="dialog" aria-modal="true" aria-labelledby="selection-title" hidden>
+    <div class="selection-inner">
+      <div class="selection-heading">
+        <div>
+          <p class="selection-kicker">Your selected designs</p>
+          <h2 id="selection-title">Review your mugs</h2>
+          <p class="selection-help">Select a mug to see it again. Your choices are saved on this device.</p>
+        </div>
+        <div class="drawer-heading-actions"><button id="clear-selection" class="text-button" type="button">Clear all</button><button id="close-collection" class="drawer-close" type="button" aria-label="Close my mugs">×</button></div>
+      </div>
+
+      <div id="selected-designs" class="selected-designs"></div><p id="collection-empty" class="collection-empty">No mugs added yet. Find a street to get started.</p>
+
+      <p id="basket-summary" class="basket-summary" aria-live="polite">0 mugs · £0.00 · UK delivery included</p>
+      <div class="selection-actions">
+        <button id="copy-design-ids" class="secondary-button" type="button">Copy Design IDs</button>
+        <button class="checkout-button" type="button" disabled aria-describedby="checkout-note">Checkout coming soon</button>
+      </div>
+      <div id="checkout-verification" hidden></div>
+      <p id="checkout-note" class="checkout-note" role="status">Checkout is not available yet in this test shop.</p>
+    </div>
+  </aside>
+
+  <template id="design-template">
+    <article class="design-card">
+      <div class="preview-grid">
+        <figure class="front-view">
+          <img class="front-image" alt="" decoding="async">
+          <figcaption>Front of mug</figcaption>
+        </figure>
+        <figure class="rear-view" hidden>
+          <img class="rear-image" alt="" decoding="async">
+          <figcaption>Reverse of mug</figcaption>
+        </figure>
+      </div>
+      <button class="enlarge-preview" type="button" aria-label="Enlarge mug image">⤢ Enlarge image</button>
+      <div class="preview-switch" role="group" aria-label="Mug view">
+        <button class="view-front is-active" type="button" aria-pressed="true"><img class="switch-front-thumb" alt="" loading="lazy">Front</button>
+        <button class="view-rear" type="button" aria-pressed="false"><img class="switch-rear-thumb" alt="" loading="lazy">Reverse</button>
+      </div>
+      <div class="design-info">
+        <div>
+          <h3 class="street-name"></h3>
+          <p class="locality"></p>
+        </div>
+        <span class="design-code"></span>
+      </div>
+      <button class="select-design" type="button">Add to my mugs</button>
+      <p class="selection-note" hidden></p>
+    </article>
+  </template>
+
+  <div id="image-lightbox" class="image-lightbox" role="dialog" aria-modal="true" aria-labelledby="lightbox-title" hidden>
+    <div class="lightbox-header">
+      <h2 id="lightbox-title">Mug preview</h2>
+      <button id="close-lightbox" type="button" aria-label="Close enlarged preview">Close ×</button>
+    </div>
+    <div id="lightbox-stage" class="lightbox-stage" aria-label="Zoomable mug image">
+      <img id="lightbox-image" alt="" draggable="false">
+    </div>
+    <div class="lightbox-toolbar">
+      <div class="lightbox-controls" role="group" aria-label="Mug view">
+        <button id="lightbox-front" type="button" aria-pressed="true">Front</button>
+        <button id="lightbox-rear" type="button" aria-pressed="false">Reverse</button>
+      </div>
+      <div class="lightbox-zoom-controls" role="group" aria-label="Image zoom">
+        <button id="lightbox-zoom-out" type="button" aria-label="Zoom out">−</button>
+        <button id="lightbox-zoom-reset" type="button" aria-label="Reset zoom">Fit</button>
+        <button id="lightbox-zoom-in" type="button" aria-label="Zoom in">+</button>
+      </div>
+    </div>
+  </div>
+
+  <template id="selected-design-template">
+    <div class="selected-design">
+      <button class="review-selected" type="button">
+        <img class="selected-thumbnail" alt="" loading="lazy" decoding="async">
+        <span class="selected-copy">
+          <strong class="selected-street"></strong>
+          <span class="selected-code"></span>
+        </span>
+        <span class="review-label">Preview</span>
+      </button>
+      <div class="basket-quantity" role="group" aria-label="Mug quantity">
+        <button class="quantity-minus" type="button">−</button>
+        <span class="quantity-value" aria-live="polite">1</span>
+        <button class="quantity-plus" type="button">+</button>
+      </div>
+      <button class="remove-selected" type="button" aria-label="Remove selected design">Remove</button>
+    </div>
+  </template>
+
+  <footer>
+    <p>Review-only: catalogue designs remain on hold; production artwork has not been approved.</p>
+  </footer>
+
+  <script src="/config.js"></script>
+  <script type="module" src="/v2-shop-preview.js"></script>
+</body>
+</html>
