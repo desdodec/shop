@@ -1,0 +1,964 @@
+import * as maplibregl from 'https://unpkg.com/maplibre-gl@6.14.0/dist/maplibre-gl.mjs';
+
+const config = { ...window.STREET_FACE_CONFIG, checkoutEnabled: false, collection: { ...window.STREET_FACE_CONFIG?.collection, id: 'hebden-bridge-v2', name: 'Hebden Bridge v2 (Review)', datasetId: 'street-face/hebden-bridge/v2', designCodePrefix: 'HBV2-', geojsonUrl: '/data/hebden_bridge_v2_streets.geojson' } };
+const collection = config?.collection;
+
+if (
+  !config?.supabaseUrl
+  || !config?.supabasePublishableKey
+  || !config?.mockupBaseUrl
+  || !collection?.id
+  || !collection?.name
+  || !collection?.datasetId
+  || !collection?.geojsonUrl
+  || !collection?.mapStyle
+) {
+  throw new Error('Storefront configuration is missing.');
+}
+
+// Checkout remains disabled in generated config until the sandbox flow is tested.
+// This does not run Turnstile or create Stripe sessions on the current public site.
+const checkoutButton = document.querySelector('.checkout-button');
+const checkoutNote = document.querySelector('#checkout-note');
+const checkoutVerification = document.querySelector('#checkout-verification');
+let checkoutBusy = false;
+let turnstileWidgetId = null;
+
+async function loadTurnstile() {
+  if (window.turnstile) return;
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Verification could not load'));
+    document.head.append(script);
+  });
+}
+
+async function requestCheckout() {
+  if (!config.checkoutEnabled || checkoutBusy) return;
+  if (!selectedDesigns.length || basketCount() > 4) {
+    checkoutNote.textContent = 'Select between one and four different mugs.';
+    return;
+  }
+  checkoutBusy = true;
+  checkoutButton.disabled = true;
+  checkoutNote.textContent = 'Verifying checkout…';
+  try {
+    await loadTurnstile();
+    checkoutVerification.hidden = false;
+    const token = await new Promise((resolve, reject) => {
+      let completed = false;
+      if (turnstileWidgetId !== null) {
+        window.turnstile.remove(turnstileWidgetId);
+        turnstileWidgetId = null;
+      }
+      turnstileWidgetId = window.turnstile.render(checkoutVerification, {
+        sitekey: config.turnstileSiteKey,
+        execution: 'execute',
+        appearance: 'execute',
+        callback: (value) => { if (!completed) { completed = true; resolve(value); } },
+        'error-callback': () => { if (!completed) { completed = true; reject(new Error('Verification failed')); } },
+        'timeout-callback': () => { if (!completed) { completed = true; reject(new Error('Verification timed out')); } },
+      });
+      window.turnstile.execute(turnstileWidgetId);
+    });
+    checkoutNote.textContent = 'Preparing secure checkout…';
+    const response = await fetch(`${config.supabaseUrl}/functions/v1/create-checkout`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({
+        items: selectedDesigns.map(item => ({design_code: item.design_code, quantity: item.quantity})),
+        turnstile_token: token,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.url || new URL(result.url).hostname !== 'checkout.stripe.com') {
+      throw new Error('Checkout unavailable. Please try again later.');
+    }
+    window.location.assign(result.url);
+  } catch (error) {
+    console.error('Checkout could not start:', error);
+    checkoutNote.textContent = 'Could not start checkout. Please try again.';
+  } finally {
+    checkoutBusy = false;
+    checkoutButton.disabled = !config.checkoutEnabled || selectedDesigns.length < 1 || basketCount() > 4;
+  }
+}
+checkoutButton.addEventListener('click', requestCheckout);
+
+const LEGACY_STORAGE_KEY = 'street-face-selected-designs-v1';
+const STORAGE_KEY = `${LEGACY_STORAGE_KEY}:${collection.id}`;
+const SUGGESTION_LIMIT = 12;
+const TYPEAHEAD_DELAY_MS = 120;
+const MAP_PAGE_SIZE = 50;
+
+const form = document.querySelector('#search-form');
+const input = document.querySelector('#search-input');
+const results = document.querySelector('#results');
+const finderResults = document.querySelector('#finder-results');
+const finderMatches = document.querySelector('.finder-matches');
+const finderCount = document.querySelector('#finder-count');
+const status = document.querySelector('#status');
+const resultCount = document.querySelector('#result-count');
+const resultsTitle = document.querySelector('#results-title');
+const template = document.querySelector('#design-template');
+const clearSearchButton = document.querySelector('#clear-search');
+const selectionTray = document.querySelector('#selection-tray');
+const selectedDesignsContainer = document.querySelector('#selected-designs');
+const selectedDesignTemplate = document.querySelector('#selected-design-template');
+const clearSelectionButton = document.querySelector('#clear-selection');
+const copyDesignIdsButton = document.querySelector('#copy-design-ids');
+const mapElement = document.querySelector('#street-map');
+const mapStatus = document.querySelector('#map-status');
+const lightbox = document.querySelector('#image-lightbox');
+const lightboxStage = document.querySelector('#lightbox-stage');
+const lightboxImage = document.querySelector('#lightbox-image');
+const lightboxTitle = document.querySelector('#lightbox-title');
+const lightboxFront = document.querySelector('#lightbox-front');
+const lightboxRear = document.querySelector('#lightbox-rear');
+const lightboxZoomIn = document.querySelector('#lightbox-zoom-in');
+const lightboxZoomOut = document.querySelector('#lightbox-zoom-out');
+const lightboxZoomReset = document.querySelector('#lightbox-zoom-reset');
+const closeLightboxButton = document.querySelector('#close-lightbox');
+let lightboxItem = null;
+let lightboxReturnFocus = null;
+let imageZoom = 1;
+let imageOffsetX = 0;
+let imageOffsetY = 0;
+let dragStart = null;
+
+function updateImageZoom() {
+  lightboxImage.style.transform = `translate(${imageOffsetX}px, ${imageOffsetY}px) scale(${imageZoom})`;
+  lightboxStage.classList.toggle('is-zoomed', imageZoom > 1);
+  lightboxZoomOut.disabled = imageZoom <= 1;
+  lightboxZoomReset.disabled = imageZoom === 1;
+  lightboxZoomIn.disabled = imageZoom >= 4;
+}
+function zoomImage(nextZoom) {
+  imageZoom = Math.min(4, Math.max(1, nextZoom));
+  if (imageZoom === 1) { imageOffsetX = 0; imageOffsetY = 0; }
+  updateImageZoom();
+}
+function setLightboxView(view) {
+  lightboxImage.src = assetUrl(view === 'front' ? lightboxItem.front_mockup_key : lightboxItem.rear_mockup_key);
+  lightboxImage.alt = `${lightboxItem.street_name} mug ${view} enlarged preview`;
+  lightboxFront.setAttribute('aria-pressed', String(view === 'front'));
+  lightboxRear.setAttribute('aria-pressed', String(view === 'rear'));
+  imageOffsetX = 0; imageOffsetY = 0; zoomImage(1);
+}
+function openLightbox(item, view, trigger) {
+  lightboxItem = item;
+  lightboxReturnFocus = trigger;
+  lightboxTitle.textContent = item.street_name;
+  setLightboxView(view);
+  lightbox.hidden = false;
+  document.body.classList.add('lightbox-open');
+  closeLightboxButton.focus();
+}
+function closeLightbox() {
+  lightbox.hidden = true;
+  document.body.classList.remove('lightbox-open');
+  dragStart = null;
+  lightboxReturnFocus?.focus();
+  lightboxItem = null;
+}
+lightboxFront.addEventListener('click', () => setLightboxView('front'));
+lightboxRear.addEventListener('click', () => setLightboxView('rear'));
+lightboxZoomIn.addEventListener('click', () => zoomImage(imageZoom + .5));
+lightboxZoomOut.addEventListener('click', () => zoomImage(imageZoom - .5));
+lightboxZoomReset.addEventListener('click', () => zoomImage(1));
+closeLightboxButton.addEventListener('click', closeLightbox);
+lightbox.addEventListener('click', (event) => { if (event.target === lightbox) closeLightbox(); });
+lightboxStage.addEventListener('dblclick', () => zoomImage(imageZoom > 1 ? 1 : 2));
+lightboxStage.addEventListener('wheel', (event) => {
+  if (lightbox.hidden) return;
+  event.preventDefault();
+  zoomImage(imageZoom + (event.deltaY < 0 ? .25 : -.25));
+}, { passive: false });
+lightboxStage.addEventListener('pointerdown', (event) => {
+  if (imageZoom <= 1) return;
+  dragStart = { x: event.clientX - imageOffsetX, y: event.clientY - imageOffsetY, pointerId: event.pointerId };
+  lightboxStage.setPointerCapture(event.pointerId);
+});
+lightboxStage.addEventListener('pointermove', (event) => {
+  if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+  imageOffsetX = event.clientX - dragStart.x;
+  imageOffsetY = event.clientY - dragStart.y;
+  updateImageZoom();
+});
+lightboxStage.addEventListener('pointerup', () => { dragStart = null; });
+lightboxStage.addEventListener('pointercancel', () => { dragStart = null; });
+document.addEventListener('keydown', (event) => {
+  if (lightbox.hidden) return;
+  if (event.key === 'Escape') { event.stopPropagation(); closeLightbox(); return; }
+  if (event.key === '+' || event.key === '=') zoomImage(imageZoom + .5);
+  if (event.key === '-') zoomImage(imageZoom - .5);
+  if (event.key !== 'Tab') return;
+  const controls = [closeLightboxButton, lightboxFront, lightboxRear, lightboxZoomOut, lightboxZoomReset, lightboxZoomIn].filter((button) => !button.disabled);
+  if (event.shiftKey && document.activeElement === controls[0]) {
+    event.preventDefault(); controls[controls.length - 1].focus();
+  } else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) {
+    event.preventDefault(); controls[0].focus();
+  }
+});
+
+const openCollectionButton = document.querySelector('#open-collection');
+const closeCollectionButton = document.querySelector('#close-collection');
+const collectionCount = document.querySelector('#collection-count');
+const collectionEmpty = document.querySelector('#collection-empty');
+const drawerBackdrop = document.querySelector('#drawer-backdrop');
+
+let currentItems = [];
+let selectedDesigns = loadSelections();
+let previewedDesignCode = null;
+let debounceTimer = null;
+let requestVersion = 0;
+let streetMap = null;
+let mapPopup = null;
+let catalogueApiMode = 'unknown';
+const mapItemsByDesignCode = new Map();
+
+function applyCollectionCopy() {
+  const pilot = document.querySelector('.pilot');
+  const heroCopy = document.querySelector('.hero-copy');
+
+  if (pilot) pilot.textContent = `${collection.name} collection`;
+  if (heroCopy) {
+    heroCopy.textContent = `These are the streets currently available in our ${collection.name} test collection. Tap a street on the map, or start typing its name below.`;
+  }
+}
+
+function loadSelections() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+      ?? (collection.id === 'hebden-bridge' ? localStorage.getItem(LEGACY_STORAGE_KEY) : null);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => item?.design_code && item?.street_name)
+      .map((item) => ({...item, quantity: Number.isInteger(item.quantity) && item.quantity >= 1 && item.quantity <= 4 ? item.quantity : 1}));
+  } catch {
+    return [];
+  }
+}
+
+function basketCount() {
+  return selectedDesigns.reduce((total, item) => total + item.quantity, 0);
+}
+
+function changeQuantity(designCode, delta) {
+  const current = selectedDesigns.find(item => item.design_code === designCode);
+  if (!current || checkoutBusy) return;
+  const next = current.quantity + delta;
+  if (next < 1 || next > 4 || (delta > 0 && basketCount() >= 4)) return;
+  current.quantity = next;
+  saveSelections();
+  renderSelectionTray();
+}
+
+function saveSelections() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedDesigns));
+}
+
+function isSelected(designCode) {
+  return selectedDesigns.some((item) => item.design_code === designCode);
+}
+
+function selectionSnapshot(item) {
+  return {
+    design_code: item.design_code,
+    street_id: item.street_id,
+    street_name: item.street_name,
+    locality: item.locality,
+    front_mockup_key: item.front_mockup_key,
+    rear_mockup_key: item.rear_mockup_key,
+    quantity: item.quantity ?? 1,
+  };
+}
+
+function assetUrl(key) {
+  const encoded = key
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  return `${config.mockupBaseUrl}/${encoded}`;
+}
+
+async function catalogueRequest(payload) {
+  return fetch(`${config.supabaseUrl}/rest/v1/rpc/search_catalogue`, {
+    method: 'POST',
+    headers: {
+      apikey: config.supabasePublishableKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+// The v2 review is isolated from the public active-design search function.
+// This endpoint returns ONLY held v2 designs. No checkout can run in this page.
+let reviewCataloguePromise = null;
+async function fetchV2ReviewCatalogue() {
+  if (reviewCataloguePromise) return reviewCataloguePromise;
+  reviewCataloguePromise = (async () => {
+    const [rpc, geoResponse] = await Promise.all([
+      fetch(`${config.supabaseUrl}/rest/v1/rpc/preview_hebden_bridge_v2`, {
+        method: 'POST',
+        headers: { apikey: config.supabasePublishableKey, 'Content-Type': 'application/json' },
+        body: '{}', cache: 'no-store'
+      }),
+      fetch(collection.geojsonUrl)
+    ]);
+    if (!rpc.ok || !geoResponse.ok) throw new Error('V2 review catalogue or geography unavailable');
+    const [records, geo] = await Promise.all([rpc.json(), geoResponse.json()]);
+    const features = geo.features || [];
+    const geoByKey = new Map(features.map(feature => [feature.properties?.street_key, feature.properties]));
+    if (records.length !== 311 || geoByKey.size !== 311 || features.length !== 311)
+      throw new Error('Review release is incomplete: expected 311 distinct records and geometries');
+    const used = new Set();
+    return records.map(record => {
+      const geographic = geoByKey.get(record.street_id);
+      if (!geographic || record.status !== 'hold' || !record.id
+        || !record.front_mockup_key?.startsWith('street-face/hebden-bridge/v2/mockups/')
+        || !record.rear_mockup_key?.startsWith('street-face/hebden-bridge/v2/mockups/')
+        || used.has(record.street_id))
+        throw new Error('V2 review identity or asset mismatch: ' + record.design_code);
+      used.add(record.street_id);
+      return { ...record, locality: [geographic.postcode_district, 'Hebden Bridge'].filter(Boolean).join(' · '),
+        postcode_district: geographic.postcode_district || '',
+        street_key: record.street_id };
+    });
+  })();
+  reviewCataloguePromise.catch(() => { reviewCataloguePromise = null; });
+  return reviewCataloguePromise;
+}
+async function searchCatalogue(searchText = '', limit = SUGGESTION_LIMIT, offset = 0) {
+  const catalogue = await fetchV2ReviewCatalogue();
+  const query = String(searchText).trim().toLocaleLowerCase('en-GB');
+  const filtered = query
+    ? catalogue.filter(row =>
+      [row.street_name, row.design_code, row.postcode_district, row.street_id]
+        .some(value => String(value || '').toLocaleLowerCase('en-GB').includes(query)))
+    : catalogue;
+  return filtered.slice(offset, offset + limit);
+}
+
+async function loadAllCatalogueItems() {
+  const items = [];
+  let offset = 0;
+
+  while (true) {
+    const page = await searchCatalogue('', MAP_PAGE_SIZE, offset);
+    items.push(...page);
+    if (page.length < MAP_PAGE_SIZE) break;
+    offset += page.length;
+  }
+
+  return items;
+}
+
+function updateCardSelection(card, item) {
+  const button = card.querySelector('.select-design');
+  const selected = isSelected(item.design_code);
+  card.classList.toggle('selected', selected);
+  button.textContent = selected ? 'Remove from my mugs' : 'Add to my mugs';
+  button.setAttribute('aria-pressed', String(selected));
+}
+
+function updateFinderSelection(option, item) {
+  // Search results always preview; selection happens only in the mug panel.
+  option.classList.toggle('selected', isSelected(item.design_code));
+}
+
+function mapSelectionExpression(selectedValue, defaultValue) {
+  const selectedCodes = selectedDesigns.map((item) => item.design_code);
+  if (!selectedCodes.length) return defaultValue;
+  return [
+    'case',
+    ['in', ['get', 'design_code'], ['literal', selectedCodes]],
+    selectedValue,
+    defaultValue,
+  ];
+}
+
+function refreshMapSelections() {
+  if (!streetMap?.getLayer('available-streets')) return;
+  streetMap.setPaintProperty(
+    'available-streets',
+    'line-color',
+    mapSelectionExpression('#8c3f22', '#191919'),
+  );
+  streetMap.setPaintProperty(
+    'available-streets',
+    'line-width',
+    mapSelectionExpression(7, 4),
+  );
+}
+
+function renderSelectionTray() {
+  selectedDesignsContainer.replaceChildren();
+  const totalQty = basketCount();
+  collectionCount.textContent = String(totalQty);
+  const basketSummary = document.querySelector('#basket-summary');
+  basketSummary.textContent = `${totalQty} mug${totalQty === 1 ? '' : 's'} · £${(totalQty * 20).toFixed(2)} · UK delivery included`;
+  collectionEmpty.hidden = selectedDesigns.length > 0;
+  checkoutButton.disabled = !config.checkoutEnabled || checkoutBusy || selectedDesigns.length < 1 || totalQty > 4;
+  if (config.checkoutEnabled) {
+    checkoutButton.textContent = `Secure checkout · £${(totalQty * 20).toFixed(2)}`;
+    checkoutNote.textContent = totalQty > 4
+      ? 'The pilot checkout supports up to four mugs.'
+      : 'UK delivery included. Payment is processed securely by Stripe.';
+  }
+
+
+  for (const savedItem of selectedDesigns) {
+    const item = mapItemsByDesignCode.get(savedItem.design_code) ?? savedItem;
+    const fragment = selectedDesignTemplate.content.cloneNode(true);
+    const selectedDesign = fragment.querySelector('.selected-design');
+    const reviewButton = fragment.querySelector('.review-selected');
+    const thumbnail = fragment.querySelector('.selected-thumbnail');
+    const reviewLabel = fragment.querySelector('.review-label');
+
+    fragment.querySelector('.selected-street').textContent = item.street_name;
+    fragment.querySelector('.selected-code').textContent = item.design_code;
+
+    const canPreview = Boolean(item.front_mockup_key && item.rear_mockup_key);
+    reviewButton.disabled = !canPreview;
+    reviewButton.setAttribute('aria-label', `Preview ${item.street_name} mug`);
+
+    if (item.front_mockup_key) {
+      thumbnail.src = assetUrl(item.front_mockup_key);
+      thumbnail.alt = `${item.street_name} mug thumbnail`;
+    } else {
+      thumbnail.removeAttribute('src');
+      thumbnail.alt = '';
+    }
+
+    if (previewedDesignCode === item.design_code) {
+      selectedDesign.classList.add('is-previewing');
+      reviewLabel.textContent = 'Viewing';
+      reviewButton.setAttribute('aria-current', 'true');
+    } else {
+      reviewLabel.textContent = canPreview ? 'Preview' : 'Loading';
+    }
+
+    reviewButton.addEventListener('click', () => {
+      if (!canPreview) return;
+      closeCollection();
+      renderDesign(item);
+    });
+
+    fragment.querySelector('.quantity-value').textContent = String(savedItem.quantity);
+    const minus = fragment.querySelector('.quantity-minus');
+    const plus = fragment.querySelector('.quantity-plus');
+    minus.disabled = checkoutBusy || savedItem.quantity <= 1;
+    plus.disabled = checkoutBusy || totalQty >= 4;
+    minus.setAttribute('aria-label', `Remove one ${item.street_name} mug`);
+    plus.setAttribute('aria-label', `Add one ${item.street_name} mug`);
+    minus.addEventListener('click', () => changeQuantity(savedItem.design_code, -1));
+    plus.addEventListener('click', () => changeQuantity(savedItem.design_code, 1));
+    const removeButton = fragment.querySelector('.remove-selected');
+    removeButton.setAttribute('aria-label', `Remove ${item.street_name} (${item.design_code})`);
+    removeButton.addEventListener('click', () => toggleSelection(item));
+    selectedDesignsContainer.append(fragment);
+  }
+}
+
+function hydrateSelectionsFromCatalogue(catalogueItems) {
+  if (!selectedDesigns.length) return;
+
+  const catalogueByCode = new Map(catalogueItems.map((item) => [item.design_code, item]));
+  let changed = false;
+
+  selectedDesigns = selectedDesigns.map((savedItem) => {
+    const catalogueItem = catalogueByCode.get(savedItem.design_code);
+    if (!catalogueItem) return savedItem;
+
+    const hydrated = selectionSnapshot(catalogueItem);
+    if (
+      savedItem.front_mockup_key !== hydrated.front_mockup_key
+      || savedItem.rear_mockup_key !== hydrated.rear_mockup_key
+      || savedItem.street_id !== hydrated.street_id
+    ) {
+      changed = true;
+    }
+    return {...hydrated, quantity: savedItem.quantity};
+  });
+
+  if (changed) saveSelections();
+  renderSelectionTray();
+}
+
+function refreshVisibleCards() {
+  results.querySelectorAll('.design-card').forEach((card) => {
+    const item = mapItemsByDesignCode.get(previewedDesignCode) ?? selectedDesigns.find((x) => x.design_code === previewedDesignCode);
+    if (item) updateCardSelection(card, item);
+  });
+}
+
+function refreshFinderSelections() {
+  finderResults.querySelectorAll('.street-finder-option').forEach((option, index) => {
+    const item = currentItems[index];
+    if (item) updateFinderSelection(option, item);
+  });
+}
+
+function updateMapStatus() {
+  if (!mapStatus || !mapItemsByDesignCode.size) return;
+  mapStatus.textContent = `${mapItemsByDesignCode.size} street designs available${selectedDesigns.length ? ` · ${selectedDesigns.length} selected` : ''}`;
+}
+
+function toggleSelection(item) {
+  if (isSelected(item.design_code)) {
+    selectedDesigns = selectedDesigns.filter((selected) => selected.design_code !== item.design_code);
+  } else {
+    if (basketCount() >= 4) {
+      const note = document.querySelector('#checkout-note');
+      note.textContent = 'The basket supports up to four mugs.';
+      openCollection();
+      return;
+    }
+    selectedDesigns = [...selectedDesigns, selectionSnapshot(item)];
+  }
+
+  saveSelections();
+  renderSelectionTray();
+  refreshVisibleCards();
+  refreshFinderSelections();
+  refreshMapSelections();
+  updateMapStatus();
+}
+
+function updateUrl(query) {
+  const url = new URL(window.location.href);
+  if (query) url.searchParams.set('q', query);
+  else url.searchParams.delete('q');
+  history.replaceState(null, '', url);
+}
+
+function renderDesign(item) {
+  // An outstanding search must never replace a freshly chosen map preview.
+  requestVersion += 1;
+  window.clearTimeout(debounceTimer);
+  previewedDesignCode = item.design_code;
+  results.replaceChildren();
+  resultsTitle.textContent = 'Your mug preview';
+  resultCount.textContent = item.design_code;
+
+  const fragment = template.content.cloneNode(true);
+  const card = fragment.querySelector('.design-card');
+  fragment.querySelector('.street-name').textContent = item.street_name;
+  fragment.querySelector('.locality').textContent = item.locality || '';
+  fragment.querySelector('.design-code').textContent = item.design_code;
+  const front = fragment.querySelector('.front-image');
+  const rear = fragment.querySelector('.rear-image');
+  front.src = assetUrl(item.front_mockup_key);
+  fragment.querySelector('.switch-front-thumb').src = front.src;
+  fragment.querySelector('.switch-rear-thumb').src = assetUrl(item.rear_mockup_key);
+  front.alt = `${item.street_name} front mug mockup`;
+  rear.src = assetUrl(item.rear_mockup_key);
+  rear.alt = `${item.street_name} reverse mug mockup`;
+
+  const showView = (view) => {
+    card.querySelector('.front-view').hidden = view !== 'front';
+    card.querySelector('.rear-view').hidden = view !== 'rear';
+    for (const side of ['front', 'rear']) {
+      const button = card.querySelector(`.view-${side}`);
+      button.classList.toggle('is-active', side === view);
+      button.setAttribute('aria-pressed', String(side === view));
+    }
+  };
+  card.querySelector('.view-front').addEventListener('click', () => showView('front'));
+  card.querySelector('.view-rear').addEventListener('click', () => showView('rear'));
+  showView('front');
+  const enlargeButton = card.querySelector('.enlarge-preview');
+  enlargeButton.addEventListener('click', () => {
+    const view = card.querySelector('.rear-view').hidden ? 'front' : 'rear';
+    openLightbox(item, view, enlargeButton);
+  });
+
+  updateCardSelection(card, item);
+  card.querySelector('.select-design').addEventListener('click', () => toggleSelection(item));
+  results.append(fragment);
+  renderSelectionTray();
+}
+
+function renderSuggestions(items, query) {
+  currentItems = items;
+  finderResults.replaceChildren();
+  finderMatches.hidden = !items.length;
+  finderCount.textContent = `${items.length} match${items.length === 1 ? '' : 'es'}`;
+
+  if (!items.length) {
+    status.textContent = `No streets containing “${query}”. Try fewer letters.`;
+    return;
+  }
+
+  if (items.length === 1) {
+    finderMatches.hidden = true;
+    renderDesign(items[0]);
+    status.textContent = `${items[0].street_name} — preview on the right.`;
+    return;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'street-finder-list';
+  for (const item of items) {
+    const option = document.createElement('div');
+    option.className = 'street-finder-option';
+    const details = document.createElement('button');
+    details.className = 'street-finder-preview';
+    details.type = 'button';
+    details.innerHTML = `<span>${escapeHtml(item.street_name)}</span><small>${escapeHtml(item.locality || '')}</small>`;
+    details.setAttribute('aria-label', `Preview ${item.street_name}`);
+    details.addEventListener('click', () => renderDesign(item));
+
+    const chooseButton = document.createElement('button');
+    chooseButton.className = 'street-finder-choice';
+    chooseButton.type = 'button';
+    chooseButton.textContent = 'Preview';
+    chooseButton.setAttribute('aria-label', `Preview ${item.street_name} mug`);
+    chooseButton.addEventListener('click', () => renderDesign(item));
+    option.append(details, chooseButton);
+    list.append(option);
+  }
+  finderResults.append(list);
+  status.textContent = 'Choose a street to preview its mug on the right.';
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function resetFinder() {
+  requestVersion += 1;
+  currentItems = [];
+  finderResults.replaceChildren();
+  finderMatches.hidden = true;
+  finderCount.textContent = '';
+  status.textContent = 'Start typing or click a street on the map.';
+  clearSearchButton.hidden = true;
+  updateUrl('');
+}
+
+async function runTypeahead(query) {
+  const trimmed = query.trim();
+  clearSearchButton.hidden = !trimmed;
+  updateUrl(trimmed);
+  const version = ++requestVersion;
+
+  if (trimmed.length < 2) {
+    currentItems = [];
+    finderResults.replaceChildren();
+    finderMatches.hidden = true;
+    status.textContent = trimmed.length === 1 ? 'Type one more letter.' : 'Start typing or click a street on the map.';
+    return;
+  }
+
+  status.textContent = 'Finding streets…';
+  finderResults.setAttribute('aria-busy', 'true');
+  try {
+    const items = await searchCatalogue(trimmed);
+    if (version !== requestVersion) return;
+    renderSuggestions(items, trimmed);
+  } catch (error) {
+    if (version !== requestVersion) return;
+    console.error(error);
+    status.textContent = 'Street finder unavailable. Please try again.';
+  } finally {
+    if (version === requestVersion) finderResults.removeAttribute('aria-busy');
+  }
+}
+
+function mapFeatureIndex(item) {
+  const streetId = String(item.street_id ?? '').trim();
+  if (/^\d+$/.test(streetId)) return Number(streetId);
+
+  if (catalogueApiMode === 'legacy' && collection.designCodePrefix) {
+    const code = String(item.design_code || '');
+    if (code.startsWith(collection.designCodePrefix)) {
+      const suffix = code.slice(collection.designCodePrefix.length);
+      if (/^\d+$/.test(suffix)) return Number(suffix);
+    }
+  }
+
+  return null;
+}
+
+function extendBoundsFromCoordinates(bounds, coordinates) {
+  if (!Array.isArray(coordinates)) return;
+  if (
+    coordinates.length >= 2
+    && typeof coordinates[0] === 'number'
+    && typeof coordinates[1] === 'number'
+  ) {
+    bounds.extend([coordinates[0], coordinates[1]]);
+    return;
+  }
+  for (const part of coordinates) extendBoundsFromCoordinates(bounds, part);
+}
+
+async function initialiseStreetMap() {
+  if (!mapElement || !mapStatus) return;
+
+  try {
+    const [geojsonResponse, catalogueItems] = await Promise.all([
+      fetch(collection.geojsonUrl),
+      loadAllCatalogueItems(),
+    ]);
+
+    if (!geojsonResponse.ok) {
+      throw new Error(`Street map data failed (${geojsonResponse.status})`);
+    }
+
+    const geojson = await geojsonResponse.json();
+    const catalogueByFeatureIndex = new Map();
+    const catalogueByStreetKey = new Map();
+    mapItemsByDesignCode.clear();
+
+    for (const item of catalogueItems) {
+      const streetId = String(item.street_id ?? '').trim();
+      if (streetId && !/^\\d+$/.test(streetId)) {
+        if (catalogueByStreetKey.has(streetId)) {
+          throw new Error(`Duplicate geographic street identity in catalogue: ${streetId}`);
+        }
+        catalogueByStreetKey.set(streetId, item);
+      } else {
+        const featureIndex = mapFeatureIndex(item);
+        if (featureIndex !== null) catalogueByFeatureIndex.set(featureIndex, item);
+      }
+      mapItemsByDesignCode.set(item.design_code, item);
+    }
+
+    hydrateSelectionsFromCatalogue(catalogueItems);
+
+    const availableFeatures = geojson.features
+      .map((feature, index) => {
+        const streetKey = String(feature.properties?.street_key ?? '').trim();
+        const item = (streetKey ? catalogueByStreetKey.get(streetKey) : null)
+          ?? catalogueByFeatureIndex.get(index);
+        if (!item) return null;
+        return {
+          ...feature,
+          properties: {
+            ...feature.properties,
+            design_code: item.design_code,
+            street_id: item.street_id ?? String(index),
+            street_name: item.street_name,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    if (!availableFeatures.length) {
+      throw new Error('No available street features were found.');
+    }
+
+    streetMap = new maplibregl.Map({
+      container: mapElement,
+      style: collection.mapStyle,
+      center: collection.initialMapCenter ?? [-2.0, 53.74],
+      zoom: collection.initialMapZoom ?? 11,
+      attributionControl: true,
+    });
+
+    streetMap.scrollZoom.disable();
+    streetMap.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+
+    streetMap.on('load', () => {
+      streetMap.addSource('available-streets-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: availableFeatures },
+      });
+
+      streetMap.addLayer({
+        id: 'available-streets-hit-area',
+        type: 'line',
+        source: 'available-streets-source',
+        paint: {
+          'line-color': '#000000',
+          'line-opacity': 0,
+          'line-width': 16,
+        },
+      });
+
+      streetMap.addLayer({
+        id: 'available-streets',
+        type: 'line',
+        source: 'available-streets-source',
+        paint: {
+          'line-color': mapSelectionExpression('#8c3f22', '#191919'),
+          'line-width': mapSelectionExpression(7, 4),
+          'line-opacity': 0.9,
+        },
+      });
+
+      streetMap.addLayer({
+        id: 'hovered-street',
+        type: 'line',
+        source: 'available-streets-source',
+        filter: ['==', ['get', 'design_code'], ''],
+        paint: {
+          'line-color': '#1976d2',
+          'line-width': 9,
+          'line-opacity': 1,
+        },
+      });
+
+      const bounds = new maplibregl.LngLatBounds();
+      for (const feature of geojson.features) {
+        extendBoundsFromCoordinates(bounds, feature.geometry?.coordinates);
+      }
+      if (!bounds.isEmpty()) {
+        streetMap.fitBounds(bounds, { padding: 34, maxZoom: 15, duration: 0 });
+      }
+
+      mapPopup = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        offset: 10,
+      });
+
+      streetMap.on('mouseenter', 'available-streets-hit-area', () => {
+        streetMap.getCanvas().style.cursor = 'pointer';
+      });
+
+      streetMap.on('mouseleave', 'available-streets-hit-area', () => {
+        streetMap.getCanvas().style.cursor = '';
+        streetMap.setFilter('hovered-street', ['==', ['get', 'design_code'], '']);
+        mapPopup.remove();
+      });
+
+      streetMap.on('mousemove', 'available-streets-hit-area', (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const designCode = feature.properties?.design_code || '';
+        const streetName = feature.properties?.street_name || 'Available street';
+        const action = 'Click to preview mug';
+        streetMap.setFilter('hovered-street', ['==', ['get', 'design_code'], designCode]);
+        mapPopup
+          .setLngLat(event.lngLat)
+          .setText(`${streetName} · ${action}`)
+          .addTo(streetMap);
+      });
+
+      streetMap.on('click', 'available-streets-hit-area', (event) => {
+        const feature = event.features?.[0];
+        const designCode = feature?.properties?.design_code;
+        const item = mapItemsByDesignCode.get(designCode);
+        if (!item) return;
+
+        renderDesign(item);
+        mapPopup
+          .setLngLat(event.lngLat)
+          .setText(`${item.street_name} · Preview on right`)
+          .addTo(streetMap);
+      });
+
+      updateMapStatus();
+    });
+
+    streetMap.on('error', (event) => {
+      console.error('Map error', event.error || event);
+    });
+  } catch (error) {
+    console.error(error);
+    mapStatus.textContent = 'The map could not be loaded. Use the street finder below.';
+    mapElement.classList.add('map-error');
+    mapElement.textContent = 'Street map unavailable';
+  }
+}
+
+function scheduleTypeahead() {
+  window.clearTimeout(debounceTimer);
+  debounceTimer = window.setTimeout(() => runTypeahead(input.value), TYPEAHEAD_DELAY_MS);
+}
+
+input.addEventListener('input', scheduleTypeahead);
+
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  window.clearTimeout(debounceTimer);
+
+  if (currentItems.length === 1) {
+    renderDesign(currentItems[0]);
+    return;
+  }
+
+  runTypeahead(input.value);
+});
+
+clearSearchButton.addEventListener('click', () => {
+  input.value = '';
+  resetFinder();
+  input.focus();
+});
+
+clearSelectionButton.addEventListener('click', () => {
+  selectedDesigns = [];
+  saveSelections();
+  renderSelectionTray();
+  refreshVisibleCards();
+  refreshFinderSelections();
+  refreshMapSelections();
+  updateMapStatus();
+});
+
+copyDesignIdsButton.addEventListener('click', async () => {
+  const codes = selectedDesigns.map((item) => item.design_code).join(', ');
+  try {
+    await navigator.clipboard.writeText(codes);
+    copyDesignIdsButton.textContent = 'Copied';
+    window.setTimeout(() => {
+      copyDesignIdsButton.textContent = 'Copy Design IDs';
+    }, 1800);
+  } catch {
+    window.prompt('Copy these Design IDs:', codes);
+  }
+});
+
+function openCollection() {
+  selectionTray.hidden = false;
+  drawerBackdrop.hidden = false;
+  openCollectionButton.setAttribute('aria-expanded', 'true');
+  document.body.classList.add('drawer-open');
+  closeCollectionButton.focus();
+}
+
+function closeCollection() {
+  selectionTray.hidden = true;
+  drawerBackdrop.hidden = true;
+  openCollectionButton.setAttribute('aria-expanded', 'false');
+  document.body.classList.remove('drawer-open');
+  openCollectionButton.focus();
+}
+
+openCollectionButton.addEventListener('click', openCollection);
+closeCollectionButton.addEventListener('click', closeCollection);
+drawerBackdrop.addEventListener('click', closeCollection);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !selectionTray.hidden) closeCollection();
+  if (event.key !== 'Tab' || selectionTray.hidden) return;
+  const controls = [...selectionTray.querySelectorAll('button:not(:disabled)')];
+  if (!controls.length) return;
+  if (event.shiftKey && document.activeElement === controls[0]) {
+    event.preventDefault(); controls[controls.length - 1].focus();
+  } else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) {
+    event.preventDefault(); controls[0].focus();
+  }
+});
+
+const initialQuery = new URL(window.location.href).searchParams.get('q')?.trim() ?? '';
+applyCollectionCopy();
+input.value = initialQuery;
+renderSelectionTray();
+initialiseStreetMap();
+
+if (initialQuery) runTypeahead(initialQuery);
+else resetFinder();
