@@ -76,13 +76,36 @@ Deno.serve(async (request) => {
     console.error("R2 read/sign failed", error instanceof Error ? error.name : "unknown");
     return response(502, { error: "Could not verify R2 object" });
   }
-  // URL is deliberately returned only to the authenticated operator.
-  // It expires after 15 minutes; never log or store the signed query string.
+  // Verify that the signed URL actually retrieves a production PNG.
+  // The signed URL is NEVER returned to the caller or logged.
+  let pngWidth = 0;
+  let pngHeight = 0;
+  let signedGetStatus = 0;
+  try {
+    const imageResponse = await fetch(signedUrl, {
+      method: "GET", headers: { Range: "bytes=0-23" }
+    });
+    signedGetStatus = imageResponse.status;
+    if (!imageResponse.ok)
+      return response(502, { error: "Signed artwork retrieval failed", signed_get_status: signedGetStatus });
+    const bytes = new Uint8Array(await imageResponse.arrayBuffer());
+    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+    if (bytes.length < 24 || !signature.every((n, i) => bytes[i] === n))
+      return response(409, { error: "The R2 object did not return a PNG header" });
+    const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    pngWidth = data.getUint32(16);
+    pngHeight = data.getUint32(20);
+    if (pngWidth !== 2670 || pngHeight !== 1110)
+      return response(409, { error: "Unexpected PNG dimensions", png_width: pngWidth, png_height: pngHeight });
+  } catch {
+    return response(502, { error: "Cannot fetch or inspect signed production PNG" });
+  }
   return response(200, {
     mode: "dry_run", submitted_to_prodigi: false,
     design_id: design.id, design_code: design.design_code, street_key: design.street_id,
     product_sku: "GLOBAL-MUG-W", copies: 1,
-    png_key: EXPECTED_KEY, png_bytes: size, signed_png_url: signedUrl,
+    png_key: EXPECTED_KEY, png_bytes: size, signed_get_status: signedGetStatus,
+    png_width: pngWidth, png_height: pngHeight, signed_png_access_verified: true,
     validation_status: assets[0].validation_status,
     warnings: [
       "No Prodigi order was created.",
