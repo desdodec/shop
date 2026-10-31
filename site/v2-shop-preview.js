@@ -90,7 +90,8 @@ checkoutButton.addEventListener('click', requestCheckout);
 
 const LEGACY_STORAGE_KEY = 'street-face-selected-designs-v1';
 const STORAGE_KEY = `${LEGACY_STORAGE_KEY}:${collection.id}`;
-const SUGGESTION_LIMIT = 12;
+const SUGGESTION_LIMIT = 311;
+const V2_VISIBLE_SEARCH_RESULTS = 30;
 const TYPEAHEAD_DELAY_MS = 120;
 const MAP_PAGE_SIZE = 50;
 
@@ -604,7 +605,7 @@ function renderSuggestions(items, query) {
 
   const list = document.createElement('div');
   list.className = 'street-finder-list';
-  for (const item of items) {
+  for (const item of items.slice(0, V2_VISIBLE_SEARCH_RESULTS)) {
     const option = document.createElement('div');
     option.className = 'street-finder-option';
     const details = document.createElement('button');
@@ -624,7 +625,9 @@ function renderSuggestions(items, query) {
     list.append(option);
   }
   finderResults.append(list);
-  status.textContent = 'Choose a street to preview its mug on the right.';
+  status.textContent = items.length > V2_VISIBLE_SEARCH_RESULTS
+    ? `Showing the first ${V2_VISIBLE_SEARCH_RESULTS} of ${items.length} matching streets. Add more of the street name to narrow your search.`
+    : 'Choose a street to preview its mug on the right.';
 }
 
 function escapeHtml(value) {
