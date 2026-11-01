@@ -113,6 +113,32 @@ Deno.serve(async (request) => {
     png_key: EXPECTED_KEY, png_bytes: size, signed_get_status: signedGetStatus,
     png_width: pngWidth, png_height: pngHeight, signed_png_access_verified: true,
     validation_status: assets[0].validation_status,
+    prodigi_sandbox_order_preview: {
+      endpoint: "https://api.sandbox.prodigi.com/v4.0/Orders/",
+      method: "POST (NOT EXECUTED)",
+      merchantReference: "STREET-FACE-HBV2-0000-SANDBOX-TEST",
+      shippingMethod: "Standard",
+      recipient: {
+        name: "Sandbox Test Recipient",
+        address: {
+          line1: "TEST ADDRESS — REPLACE BEFORE SUBMISSION",
+          townOrCity: "TEST CITY",
+          postalOrZipCode: "TEST POSTCODE",
+          countryCode: "GB",
+        },
+      },
+      items: [{
+        merchantReference: DESIGN,
+        sku: "GLOBAL-MUG-W",
+        copies: 1,
+        sizing: "fillPrintArea",
+        assets: [{
+          printArea: "default",
+          url: "[SIGNED R2 PNG URL — withheld from response]",
+        }],
+      }],
+      metadata: { source: "street-face-sandbox-manual-test" },
+    },
     warnings: [
       "No Prodigi order was created.",
       "A signed URL is a short-lived access credential; do not share it publicly.",
