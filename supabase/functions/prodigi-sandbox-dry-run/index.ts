@@ -22,9 +22,10 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return response(405, { error: "Method not allowed" });
   const required = ["SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY","PRODIGI_PREVIEW_ADMIN_TOKEN",
     "R2_ACCOUNT_ID","R2_ACCESS_KEY_ID","R2_SECRET_ACCESS_KEY","R2_BUCKET"];
-  if (required.some(name => !Deno.env.get(name))) return response(503, { error: "Not configured" });
+  // Authenticate before disclosing which non-authentication settings are unavailable.
   const authorization = request.headers.get("authorization") ?? "";
-  const secret = Deno.env.get("PRODIGI_PREVIEW_ADMIN_TOKEN")!;
+  const secret = Deno.env.get("PRODIGI_PREVIEW_ADMIN_TOKEN") ?? "";
+  if (!secret) return response(503, { error: "Operator authentication not configured" });
   // Compare a SHA-256 digest rather than raw strings.
   const encoder = new TextEncoder();
   const sha = async (value: string) => new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
@@ -33,6 +34,11 @@ Deno.serve(async (request) => {
   let difference = actual.length ^ expected.length;
   for (let i=0; i<Math.min(actual.length,expected.length); i++) difference |= actual[i] ^ expected[i];
   if (difference !== 0) return response(403, { error: "Forbidden" });
+  const missingSecrets = required.filter(name => !Deno.env.get(name));
+  if (missingSecrets.length) return response(503, {
+    error: "Missing function environment values",
+    missing_secret_names: missingSecrets,
+  });
 
   let body: Record<string, unknown>;
   try { body = await request.json(); } catch { return response(400, { error: "Invalid JSON" }); }
