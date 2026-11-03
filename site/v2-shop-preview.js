@@ -468,9 +468,13 @@ function hydrateSelectionsFromCatalogue(catalogueItems) {
   const catalogueByCode = new Map(catalogueItems.map((item) => [item.design_code, item]));
   let changed = false;
 
-  selectedDesigns = selectedDesigns.map((savedItem) => {
+  // Remove no-longer-published streets from local review baskets.
+  selectedDesigns = selectedDesigns.flatMap((savedItem) => {
     const catalogueItem = catalogueByCode.get(savedItem.design_code);
-    if (!catalogueItem) return savedItem;
+    if (!catalogueItem) {
+      changed = true;
+      return [];
+    }
 
     const hydrated = selectionSnapshot(catalogueItem);
     if (
@@ -480,7 +484,7 @@ function hydrateSelectionsFromCatalogue(catalogueItems) {
     ) {
       changed = true;
     }
-    return {...hydrated, quantity: savedItem.quantity};
+    return [{...hydrated, quantity: savedItem.quantity}];
   });
 
   if (changed) saveSelections();
