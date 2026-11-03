@@ -279,11 +279,12 @@ function selectionSnapshot(item) {
 }
 
 function assetUrl(key) {
-  const encoded = key
+  const [path, revision] = String(key).split('?v=');
+  const encoded = path
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/');
-  return `${config.mockupBaseUrl}/${encoded}`;
+  return `${config.mockupBaseUrl}/${encoded}${revision ? '?v=' + encodeURIComponent(revision) : ''}`;
 }
 
 async function catalogueRequest(payload) {
@@ -303,32 +304,27 @@ let reviewCataloguePromise = null;
 async function fetchV2ReviewCatalogue() {
   if (reviewCataloguePromise) return reviewCataloguePromise;
   reviewCataloguePromise = (async () => {
-    const [rpc, geoResponse] = await Promise.all([
-      fetch(`${config.supabaseUrl}/rest/v1/rpc/preview_hebden_bridge_v2`, {
-        method: 'POST',
-        headers: { apikey: config.supabasePublishableKey, 'Content-Type': 'application/json' },
-        body: '{}', cache: 'no-store'
-      }),
-      fetch(collection.geojsonUrl)
-    ]);
-    if (!rpc.ok || !geoResponse.ok) throw new Error('V2 review catalogue or geography unavailable');
-    const [records, geo] = await Promise.all([rpc.json(), geoResponse.json()]);
-    const features = geo.features || [];
-    const geoByKey = new Map(features.map(feature => [feature.properties?.street_key, feature.properties]));
-    if (records.length !== 311 || geoByKey.size !== 311 || features.length !== 311)
-      throw new Error('Review release is incomplete: expected 311 distinct records and geometries');
-    const used = new Set();
+    const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/street_face_current_v2`, {
+      method: 'POST',
+      headers: { apikey: config.supabasePublishableKey, 'Content-Type': 'application/json' },
+      body: '{}', cache: 'no-store'
+    });
+    if (!response.ok) throw new Error('Published v2 collection unavailable');
+    const records = await response.json();
+    if (!Array.isArray(records)) throw new Error('Invalid published catalogue');
+    const seen = new Set();
     return records.map(record => {
-      const geographic = geoByKey.get(record.street_id);
-      if (!geographic || record.status !== 'hold' || !record.id
+      if (!record.street_id || seen.has(record.street_id) || !record.geometry
         || !record.front_mockup_key?.startsWith('street-face/hebden-bridge/v2/mockups/')
-        || !record.rear_mockup_key?.startsWith('street-face/hebden-bridge/v2/mockups/')
-        || used.has(record.street_id))
-        throw new Error('V2 review identity or asset mismatch: ' + record.design_code);
-      used.add(record.street_id);
-      return { ...record, locality: [geographic.postcode_district, 'Hebden Bridge'].filter(Boolean).join(' · '),
-        postcode_district: geographic.postcode_district || '',
-        street_key: record.street_id };
+        || !record.rear_mockup_key?.startsWith('street-face/hebden-bridge/v2/mockups/'))
+        throw new Error('Published collection identity or mockup mismatch');
+      seen.add(record.street_id);
+      return {
+        ...record,
+        locality: [record.postcode_district, 'Hebden Bridge'].filter(Boolean).join(' · '),
+        front_mockup_key: record.front_mockup_key + (record.front_etag ? '?v=' + record.front_etag : ''),
+        rear_mockup_key: record.rear_mockup_key + (record.rear_etag ? '?v=' + record.rear_etag : '')
+      };
     });
   })();
   reviewCataloguePromise.catch(() => { reviewCataloguePromise = null; });
@@ -711,16 +707,16 @@ async function initialiseStreetMap() {
   if (!mapElement || !mapStatus) return;
 
   try {
-    const [geojsonResponse, catalogueItems] = await Promise.all([
-      fetch(collection.geojsonUrl),
-      loadAllCatalogueItems(),
-    ]);
-
-    if (!geojsonResponse.ok) {
-      throw new Error(`Street map data failed (${geojsonResponse.status})`);
-    }
-
-    const geojson = await geojsonResponse.json();
+    const catalogueItems = await loadAllCatalogueItems();
+    const geojson = {
+      type: 'FeatureCollection',
+      features: catalogueItems.map(item => ({
+        type: 'Feature',
+        properties: { street_key: item.street_id, name: item.street_name,
+          postcode_district: item.postcode_district },
+        geometry: item.geometry
+      }))
+    };
     const catalogueByFeatureIndex = new Map();
     const catalogueByStreetKey = new Map();
     mapItemsByDesignCode.clear();
