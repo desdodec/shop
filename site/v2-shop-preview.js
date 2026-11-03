@@ -90,7 +90,7 @@ checkoutButton.addEventListener('click', requestCheckout);
 
 const LEGACY_STORAGE_KEY = 'street-face-selected-designs-v1';
 const STORAGE_KEY = `${LEGACY_STORAGE_KEY}:${collection.id}`;
-const SUGGESTION_LIMIT = 311;
+const SUGGESTION_LIMIT = 2000; // Dynamic release size, not the original 311-street count.
 const V2_VISIBLE_SEARCH_RESULTS = 30;
 const TYPEAHEAD_DELAY_MS = 120;
 const MAP_PAGE_SIZE = 50;
