@@ -55,6 +55,14 @@ body.lightbox-open{overflow:hidden}
 .lightbox-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:0 0 auto;min-height:40px}
 .lightbox-header h2{font-size:clamp(1rem,2vw,1.35rem);letter-spacing:-.04em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #close-lightbox{background:#262b28;color:white;border:0;border-radius:8px;padding:9px 14px;font-weight:700}
+/* Marketplace-style product zoom: mouse magnifies in place; click/tap opens the full viewer. */
+.preview-grid figure:not([hidden]){position:relative;overflow:hidden;cursor:zoom-in;outline-offset:-4px}
+.preview-grid figure:not([hidden]):focus-visible{outline:3px solid #a65a3d}
+.preview-grid figure img{transform-origin:var(--zoom-x,50%) var(--zoom-y,50%);transition:transform .16s ease-out;will-change:transform;pointer-events:none}
+@media (hover:hover) and (pointer:fine){
+  .preview-grid figure.is-hover-zoomed img{transform:scale(2.5);transition:none}
+}
+@media (prefers-reduced-motion:reduce){.preview-grid figure img{transition:none}}
 .lightbox-stage{flex:1 1 auto;min-height:0;width:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:8px;background:#f1eee8;touch-action:none;cursor:zoom-in}
 .lightbox-stage.is-zoomed{cursor:grab}
 .lightbox-stage.is-zoomed:active{cursor:grabbing}
