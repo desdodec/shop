@@ -442,6 +442,31 @@ function renderDesign(item) {
       button.setAttribute('aria-pressed', String(side === view));
     }
   };
+  // Desktop: follow the pointer to zoom into the mug artwork in place.
+  // Touch users and keyboard users open the existing full-screen viewer instead.
+  const canHoverZoom = window.matchMedia('(hover: hover) and (pointer: fine)');
+  for (const side of ['front', 'rear']) {
+    const figure = card.querySelector(`.${side}-view`);
+    figure.tabIndex = 0;
+    figure.setAttribute('role', 'button');
+    figure.setAttribute('aria-label', `Enlarge ${item.street_name} mug ${side === 'front' ? 'front' : 'reverse'} image`);
+    figure.addEventListener('pointermove', (event) => {
+      if (!canHoverZoom.matches || event.pointerType !== 'mouse') return;
+      const rect = figure.getBoundingClientRect();
+      const x = Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100));
+      const y = Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100));
+      figure.style.setProperty('--zoom-x', `${x}%`);
+      figure.style.setProperty('--zoom-y', `${y}%`);
+      figure.classList.add('is-hover-zoomed');
+    });
+    figure.addEventListener('pointerleave', () => figure.classList.remove('is-hover-zoomed'));
+    figure.addEventListener('click', () => openLightbox(item, side, figure));
+    figure.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openLightbox(item, side, figure);
+    });
+  }
   card.querySelector('.view-front').addEventListener('click', () => showView('front'));
   card.querySelector('.view-rear').addEventListener('click', () => showView('rear'));
   showView('front');
