@@ -1,124 +1,87 @@
-# Storefront deployment
+# Storefront deployment — Cloudflare Workers
 
-This phase exposes the validated catalogue to a public Netlify site without exposing production artwork or Supabase server credentials.
+Street Face is hosted on **Cloudflare Workers Static Assets**, not Netlify. The storefront consists of static files in `site/` and a generated public `site/config.js`.
+
+The separate Cloudflare Worker at `cloudflare/mockup-worker/` continues to serve **only public front/rear mockups** from R2. It must not serve high-resolution production artwork.
 
 ## Security boundary
 
-- R2 bucket remains private.
-- Cloudflare Worker exposes only `front/` and `rear/` keys.
-- `prodigi_h_mug_w/` remains inaccessible through the Worker.
-- Browser has no direct SELECT permission on `designs`, `design_assets`, `design_postcodes`, `design_postcode_sectors`, or `orders`.
-- Browser calls only `search_catalogue(...)`.
-- The RPC returns only:
-  - `design_code`
-  - `street_name`
-  - `locality`
-  - `front_mockup_key`
-  - `rear_mockup_key`
-- `production_key`, internal UUIDs, sizes, ETags and order data are not returned.
+- Cloudflare R2 production artwork stays private.
+- The image-delivery Worker exposes only permitted `front/` and `rear/` mockup paths.
+- Browser clients never receive Supabase service-role credentials or R2 secrets.
+- Browser database access is restricted to `search_catalogue(...)`.
+- The public catalogue returns Design ID, street name, locality, and front/rear mockup keys — not print-ready object keys.
+- Never commit `site/config.js`; it is generated using **public-only** frontend values.
 
-## 1. Apply the Supabase public catalogue API
+## 1. Database API
 
-Open the Supabase SQL editor and run the complete contents of:
+Apply `supabase/public_catalogue.sql` in the Supabase SQL editor if it has not already been applied.
 
-```text
-supabase/public_catalogue.sql
+In the Supabase dashboard, locate the project's URL and **publishable** API key (`sb_publishable_...`). Do **not** use a service-role/secret key.
+
+## 2. Collection manifest
+
+The pilot uses `collections/hebden-bridge.json`. It specifies the collection name, dataset ID, GeoJSON source, browser map style and design-code prefix.
+
+The build script `scripts/write-public-config.mjs` writes `site/config.js` and copies the selected GeoJSON to the site directory.
+
+To deploy a different area later, set `COLLECTION_ID` to the area manifest's filename stem. The default is `hebden-bridge`.
+
+## 3. Configure Cloudflare Workers build/deployment
+
+The repository root includes `wrangler.jsonc`:
+
+```json
+{
+  "name": "street-face-shop",
+  "compatibility_date": "2026-11-07",
+  "assets": { "directory": "./site" }
+}
 ```
 
-The migration revokes browser roles from the internal tables and grants them execute permission only on the browser-safe catalogue function.
-
-Full postcodes use exact mappings only. Partial postcode/sector discovery remains available in the backend for future use, although the current pilot UI is intentionally street-name-first.
-
-## 2. Create or locate a Supabase publishable key
-
-In the Supabase dashboard open the project's API Keys settings / Connect dialog and use a publishable key beginning with:
+Use a **Cloudflare Workers** project linked to the GitHub repository, with these build settings:
 
 ```text
-sb_publishable_
+Build command: npm run build
+Deploy command: npx wrangler deploy
+Root directory: repository root
 ```
 
-Do not use the server secret/service-role key in Netlify or browser code.
-
-## 3. Collection manifest
-
-The pilot collection is defined in:
-
-```text
-collections/hebden-bridge.json
-```
-
-The manifest contains the collection name, canonical dataset ID, public Design ID prefix, GeoJSON source, published GeoJSON URL and map style. The browser reads those values from generated `site/config.js` instead of hard-coding Hebden Bridge map paths or the `HB-` prefix.
-
-The build defaults to:
-
-```text
-COLLECTION_ID=hebden-bridge
-```
-
-There is no need to set this variable for the pilot. A later single-area deployment can point at another collection manifest by setting `COLLECTION_ID` in Netlify after the new manifest and GeoJSON have been added.
-
-This is deliberately not a multi-area customer UI yet. It only keeps the current implementation from being tied unnecessarily to Hebden Bridge.
-
-## 4. Create the Netlify site
-
-Create a Netlify project from the GitHub repository:
-
-```text
-https://github.com/desdodec/shop
-```
-
-`netlify.toml` already defines:
-
-```text
-build command: node scripts/write-public-config.mjs
-publish directory: site
-```
-
-The build script reads the active collection manifest, writes `site/config.js`, and copies that collection's GeoJSON into the published site.
-
-## 5. Add Netlify environment variables
-
-In Netlify, under Project configuration -> Environment variables, add:
+Set these **build-time** environment variables in Cloudflare's project settings:
 
 ```text
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-MOCKUP_BASE_URL=https://shop-mockup-delivery.tessellnationstation.workers.dev
+MOCKUP_BASE_URL=https://YOUR_EXISTING_MOCKUP_WORKER.workers.dev
 ```
 
-Do not add `SUPABASE_SERVICE_ROLE_KEY` or any R2 secret to the frontend project.
+All three values are intended to be visible to browsers; never put secret credentials in the public build environment. The generated `config.js` is public and contains only these non-secret values.
 
-The generated `site/config.js` is gitignored.
+If the site is deployed manually instead of through GitHub integration, create a local untracked `.env` or export these environment variables for the build process, then:
 
-## 6. Deploy and validate
+```bash
+npm install
+npm run build
+npx wrangler deploy
+```
 
-Trigger a Netlify deploy. The pilot should:
+Wrangler may require a one-time Cloudflare login for local deployment.
 
-1. Show the current collection name and interactive street map.
-2. Report 205 available street designs for the Hebden Bridge pilot.
-3. Highlight an available street on hover.
-4. Allow several streets to be selected from the map without clearing earlier selections.
-5. Allow several streets to be selected from rapid text-search results.
-6. Search `Blenheim` and find Design ID `HB-0024`.
-7. Load front and reverse mockups through the Cloudflare Worker.
-8. Keep selected designs in browser storage scoped to the active collection.
-9. Send only the Supabase publishable key from the browser.
-10. Never return `production_key`, internal UUIDs, sizes, ETags or order data.
-11. Deny direct browser REST access to internal catalogue/order tables.
-12. Keep the Cloudflare production-artwork URL returning HTTP 404.
+## 4. Validate
 
-## Adding another area later
+1. Check that the Cloudflare deployment opens the Street Face landing page.
+2. Search for a street and see the front/reverse mug mockups.
+3. Confirm the map loads and available streets highlight on pointer hover.
+4. Select multiple streets from search and the map; verify the basket persists.
+5. Confirm the front/reverse mug viewer opens, zooms and closes.
+6. Check that `/config.js` loads and contains **no secrets**.
+7. Check that production artwork is **not** accessible via the mockup delivery Worker.
+8. Check that internal Supabase tables cannot be selected directly by the browser.
 
-Do not add an area selector until the pilot justifies it. When another area is ready, the expected sequence is:
+## 5. Custom domain
 
-1. Generate the area's designs and canonical dataset.
-2. Add its GeoJSON file.
-3. Add a new `collections/<area>.json` manifest with its own dataset ID and Design ID prefix.
-4. Import/validate its catalogue records and assets.
-5. Decide whether to deploy it as a separate collection first or introduce an area selector that filters the public catalogue by dataset.
+Point the existing Street Face domain to the Cloudflare Worker in Cloudflare's domain/route settings. Verify DNS and Worker routing before retiring any previous hosting configuration. A GitHub commit alone does **not** guarantee a Cloudflare deployment until the project is connected and its build variables are set.
 
-The canonical fulfilment identity remains `dataset_id + street_id`; street names are never used as database-write or fulfilment identity.
+## Future checkout
 
-## Next phase
-
-Once the pilot UX is stable, connect the selected public `design_code` values to Etsy order capture. The server-side order path must resolve each unique Design ID to the internal design row and validated asset version before an order can become eligible for manual Prodigi submission.
+Etsy checkout and Prodigi order handling are not part of this static storefront deployment. Add server-side order processing separately, without exposing Etsy, Prodigi or R2 production credentials to the browser.
